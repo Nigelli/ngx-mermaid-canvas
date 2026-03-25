@@ -4,7 +4,7 @@ import {
 } from '@angular/core';
 import {
   Graph, InternalEvent, UndoManager, RubberBandHandler, KeyHandler, Cell, CellStyle,
-  DragSource, type EventObject, Geometry,
+  ConnectionConstraint, type EventObject, Point,
 } from '@maxgraph/core';
 import { GraphStateService } from '../../services/graph-state.service';
 import { LayoutService } from '../../services/layout.service';
@@ -22,9 +22,11 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       width: 100%;
       height: 100%;
       overflow: auto;
-      background: #f8f9fa;
       cursor: default;
       position: relative;
+      background-color: #f8f9fa;
+      background-image: radial-gradient(circle, #d0d0d0 1px, transparent 1px);
+      background-size: 20px 20px;
     }
   `],
 })
@@ -123,6 +125,19 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       if (!this.suppressEvents) {
         this.zone.run(() => this.extractAndPushModel());
       }
+    };
+
+    // Define connection points on vertices (N, S, E, W + corners)
+    g.getAllConnectionConstraints = (terminal) => {
+      if (terminal?.cell?.isVertex()) {
+        return [
+          new ConnectionConstraint(new Point(0.5, 0), true),   // top center
+          new ConnectionConstraint(new Point(1, 0.5), true),   // right center
+          new ConnectionConstraint(new Point(0.5, 1), true),   // bottom center
+          new ConnectionConstraint(new Point(0, 0.5), true),   // left center
+        ];
+      }
+      return [];
     };
 
     // Set default edge style
@@ -242,7 +257,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   /** Add a node at the given position with the given shape */
   addNode(shape: MermaidShape, x: number, y: number): void {
     const id = this.state.generateNodeId();
-    const label = id;
+    const label = this.defaultLabel(shape, id);
     const size = getDefaultSize(shape);
     const style = getVertexStyle(shape);
 
@@ -295,7 +310,40 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   fitToPage(): void {
-    this.graph.zoomActual();
+    const g = this.graph;
+    const bounds = g.getGraphBounds();
+    if (bounds.width === 0 || bounds.height === 0) {
+      g.zoomActual();
+      return;
+    }
+    const container = this.containerRef.nativeElement;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    const padding = 40;
+
+    const scaleX = (cw - padding * 2) / bounds.width;
+    const scaleY = (ch - padding * 2) / bounds.height;
+    const scale = Math.min(scaleX, scaleY, 1); // Don't zoom beyond 100%
+
+    g.getView().scaleAndTranslate(
+      scale,
+      -bounds.x / scale + padding / scale + (cw / scale - bounds.width) / 2,
+      -bounds.y / scale + padding / scale + (ch / scale - bounds.height) / 2,
+    );
+  }
+
+  private defaultLabel(shape: MermaidShape, id: string): string {
+    const labels: Record<MermaidShape, string> = {
+      rectangle: 'Process',
+      rounded: 'Step',
+      diamond: 'Decision',
+      circle: 'Event',
+      stadium: 'Terminal',
+      parallelogram: 'I/O',
+      subroutine: 'Subroutine',
+      asymmetric: 'Flag',
+    };
+    return `${labels[shape]} ${id}`;
   }
 
   ngOnDestroy(): void {

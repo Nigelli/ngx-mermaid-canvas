@@ -1,6 +1,6 @@
 import {
   Component, inject, effect, ElementRef, ViewChild,
-  AfterViewInit, NgZone, Injector, runInInjectionContext,
+  AfterViewInit, Injector, runInInjectionContext, signal,
 } from '@angular/core';
 import { GraphStateService } from '../../services/graph-state.service';
 
@@ -9,7 +9,12 @@ import { GraphStateService } from '../../services/graph-state.service';
   standalone: true,
   template: `
     <div class="text-editor-container">
-      <div class="text-editor-header">Mermaid Source</div>
+      <div class="text-editor-header">
+        <span>Mermaid Source</span>
+        <button class="copy-btn" (click)="copyToClipboard()" [title]="copyLabel()">
+          {{ copyLabel() }}
+        </button>
+      </div>
       <textarea
         #editorEl
         class="text-editor"
@@ -27,6 +32,9 @@ import { GraphStateService } from '../../services/graph-state.service';
       height: 100%;
     }
     .text-editor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
@@ -35,6 +43,22 @@ import { GraphStateService } from '../../services/graph-state.service';
       background: #fafafa;
       border-bottom: 1px solid #e0e0e0;
       letter-spacing: 0.5px;
+    }
+    .copy-btn {
+      font-size: 10px;
+      padding: 2px 8px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      background: #fff;
+      cursor: pointer;
+      color: #666;
+      text-transform: none;
+      letter-spacing: 0;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover {
+      background: #f0f4ff;
+      border-color: #aac;
     }
     .text-editor {
       flex: 1;
@@ -58,6 +82,7 @@ export class TextEditorComponent implements AfterViewInit {
   @ViewChild('editorEl', { static: true }) editorRef!: ElementRef<HTMLTextAreaElement>;
 
   state = inject(GraphStateService);
+  copyLabel = signal('Copy');
   private injector = inject(Injector);
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private suppressUpdate = false;
@@ -85,5 +110,19 @@ export class TextEditorComponent implements AfterViewInit {
     this.debounceTimer = setTimeout(() => {
       this.state.updateFromText(text);
     }, 500);
+  }
+
+  async copyToClipboard(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.state.mermaidText());
+      this.copyLabel.set('Copied!');
+      setTimeout(() => this.copyLabel.set('Copy'), 1500);
+    } catch {
+      // Fallback for non-secure contexts
+      this.editorRef.nativeElement.select();
+      document.execCommand('copy');
+      this.copyLabel.set('Copied!');
+      setTimeout(() => this.copyLabel.set('Copy'), 1500);
+    }
   }
 }
