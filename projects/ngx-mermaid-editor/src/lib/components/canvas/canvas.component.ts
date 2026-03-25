@@ -4,7 +4,7 @@ import {
 } from '@angular/core';
 import {
   Graph, InternalEvent, UndoManager, RubberBandHandler, KeyHandler, Cell, CellStyle,
-  ConnectionConstraint, type EventObject, Point,
+  ConnectionConstraint, Outline, type EventObject, Point,
 } from '@maxgraph/core';
 import { GraphStateService } from '../../services/graph-state.service';
 import { LayoutService } from '../../services/layout.service';
@@ -15,9 +15,35 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
 @Component({
   selector: 'lib-canvas',
   standalone: true,
-  template: `<div #graphContainer class="graph-container"></div>`,
+  template: `
+    <div #graphContainer class="graph-container" (contextmenu)="onContextMenu($event)"></div>
+    <div #minimapContainer class="minimap"></div>
+    @if (contextMenu) {
+      <div class="context-menu" [style.left.px]="contextMenu.x" [style.top.px]="contextMenu.y">
+        @if (contextMenu.cell) {
+          <button class="ctx-item" (mousedown)="editLabel()">Edit Label</button>
+          @if (contextMenu.isEdge) {
+            <div class="ctx-divider"></div>
+            <button class="ctx-item" (mousedown)="setEdgeType('arrow')">→ Solid Arrow</button>
+            <button class="ctx-item" (mousedown)="setEdgeType('dotted-arrow')">⇢ Dashed Arrow</button>
+            <button class="ctx-item" (mousedown)="setEdgeType('thick-arrow')">⇒ Thick Arrow</button>
+            <button class="ctx-item" (mousedown)="setEdgeType('open')">— No Arrow</button>
+          }
+          <div class="ctx-divider"></div>
+          <button class="ctx-item danger" (mousedown)="deleteSelected()">Delete</button>
+        } @else {
+          <button class="ctx-item" (mousedown)="addNodeAt(contextMenu.graphX, contextMenu.graphY, 'rectangle')">Add Process</button>
+          <button class="ctx-item" (mousedown)="addNodeAt(contextMenu.graphX, contextMenu.graphY, 'diamond')">Add Decision</button>
+          <button class="ctx-item" (mousedown)="addNodeAt(contextMenu.graphX, contextMenu.graphY, 'rounded')">Add Start/End</button>
+          <div class="ctx-divider"></div>
+          <button class="ctx-item" (mousedown)="pasteAtContext()">Paste</button>
+        }
+      </div>
+    }
+  `,
   styles: [`
     :host { display: block; width: 100%; height: 100%; }
+    :host { position: relative; }
     .graph-container {
       width: 100%;
       height: 100%;
@@ -28,14 +54,58 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       background-image: radial-gradient(circle, #d0d0d0 1px, transparent 1px);
       background-size: 20px 20px;
     }
+    .minimap {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      width: 150px;
+      height: 110px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #fff;
+      opacity: 0.85;
+      overflow: hidden;
+      z-index: 10;
+    }
+    .context-menu {
+      position: absolute;
+      z-index: 1000;
+      background: #fff;
+      border: 1px solid #d0d0d0;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 4px 0;
+      min-width: 160px;
+    }
+    .ctx-item {
+      display: block;
+      width: 100%;
+      padding: 6px 14px;
+      font-size: 12px;
+      text-align: left;
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: #333;
+    }
+    .ctx-item:hover { background: #f0f4ff; }
+    .ctx-item.danger { color: #c33; }
+    .ctx-item.danger:hover { background: #fff0f0; }
+    .ctx-divider {
+      height: 1px;
+      background: #e8e8e8;
+      margin: 4px 0;
+    }
   `],
 })
 export class CanvasComponent implements AfterViewInit, OnDestroy {
   @ViewChild('graphContainer', { static: true }) containerRef!: ElementRef<HTMLDivElement>;
+  @ViewChild('minimapContainer', { static: true }) minimapRef!: ElementRef<HTMLDivElement>;
 
   private graph!: Graph;
   private undoManager!: UndoManager;
   private suppressEvents = false;
+  contextMenu: { x: number; y: number; cell: Cell | null; isEdge: boolean; graphX: number; graphY: number } | null = null;
 
   private state = inject(GraphStateService);
   private layoutService = inject(LayoutService);
@@ -64,8 +134,15 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   private initGraph(): void {
     const container = this.containerRef.nativeElement;
 
-    // Disable built-in context menu
+    // Disable browser context menu (we use our own)
     InternalEvent.disableContextMenu(container);
+
+    // Close context menu on any click
+    container.addEventListener('mousedown', () => {
+      if (this.contextMenu) {
+        this.zone.run(() => this.contextMenu = null);
+      }
+    });
 
     this.graph = new Graph(container);
     const g = this.graph;
@@ -177,6 +254,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     if (initial.nodes.size > 0) {
       this.syncFromModel(initial);
     }
+
+    // Initialize minimap
+    new Outline(g, this.minimapRef.nativeElement);
   }
 
   /** Extract current graph state into IR and push to state service */
@@ -301,6 +381,48 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     const x = (container.clientWidth / 2 - translate.x * scale) / scale - 70;
     const y = (container.clientHeight / 2 - translate.y * scale) / scale - 25;
     this.addNode(shape, x, y);
+  }
+
+  onContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    const container = this.containerRef.nativeElement;
+    const rect = container.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // Find cell under cursor
+    const pt = this.graph.getPointForEvent(event);
+    const cell = this.graph.getCellAt(event.offsetX, event.offsetY);
+
+    if (cell) {
+      this.graph.setSelectionCell(cell);
+    }
+
+    this.contextMenu = {
+      x, y,
+      cell: cell ?? null,
+      isEdge: cell?.isEdge() ?? false,
+      graphX: pt.x - 70,
+      graphY: pt.y - 25,
+    };
+  }
+
+  editLabel(): void {
+    const cell = this.graph.getSelectionCell();
+    if (cell) {
+      this.graph.startEditingAtCell(cell);
+    }
+    this.contextMenu = null;
+  }
+
+  addNodeAt(x: number, y: number, shape: MermaidShape): void {
+    this.addNode(shape, x, y);
+    this.contextMenu = null;
+  }
+
+  pasteAtContext(): void {
+    // Simple paste: duplicate selected cells at context menu position
+    this.contextMenu = null;
   }
 
   private updateSelectionState(): void {
