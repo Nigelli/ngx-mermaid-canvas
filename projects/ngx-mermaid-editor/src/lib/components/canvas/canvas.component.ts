@@ -106,6 +106,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   private undoManager!: UndoManager;
   private suppressEvents = false;
   contextMenu: { x: number; y: number; cell: Cell | null; isEdge: boolean; graphX: number; graphY: number } | null = null;
+  private documentListeners: Array<() => void> = [];
 
   private state = inject(GraphStateService);
   private layoutService = inject(LayoutService);
@@ -137,12 +138,26 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     // Disable browser context menu (we use our own)
     InternalEvent.disableContextMenu(container);
 
-    // Close context menu on any click
-    container.addEventListener('mousedown', () => {
+    // Close context menu on any click anywhere
+    const closeContextMenu = (e: MouseEvent) => {
+      if (this.contextMenu) {
+        // Don't close if clicking inside the context menu itself
+        const target = e.target as HTMLElement;
+        if (target.closest('.context-menu')) return;
+        this.zone.run(() => this.contextMenu = null);
+      }
+    };
+    const closeOnRightClick = () => {
       if (this.contextMenu) {
         this.zone.run(() => this.contextMenu = null);
       }
-    });
+    };
+    document.addEventListener('mousedown', closeContextMenu);
+    document.addEventListener('contextmenu', closeOnRightClick);
+    this.documentListeners.push(
+      () => document.removeEventListener('mousedown', closeContextMenu),
+      () => document.removeEventListener('contextmenu', closeOnRightClick),
+    );
 
     this.graph = new Graph(container);
     const g = this.graph;
@@ -526,6 +541,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.documentListeners.forEach(fn => fn());
     this.graph?.destroy();
   }
 }
