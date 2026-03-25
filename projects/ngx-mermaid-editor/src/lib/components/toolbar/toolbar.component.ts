@@ -24,33 +24,41 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
       <div class="toolbar-divider"></div>
 
       <div class="toolbar-group">
-        <label class="toolbar-label">Edge</label>
-        <select class="toolbar-select" (change)="onEdgeTypeChange($event)">
-          <option value="arrow">→ Solid</option>
-          <option value="dotted-arrow">⇢ Dashed</option>
-          <option value="thick-arrow">⇒ Thick</option>
-          <option value="open">— Open</option>
-        </select>
-      </div>
-
-      <div class="toolbar-divider"></div>
-
-      <div class="toolbar-group">
         <button class="toolbar-btn" title="Undo (Ctrl+Z)" (click)="undoClicked.emit()">↩</button>
         <button class="toolbar-btn" title="Redo (Ctrl+Y)" (click)="redoClicked.emit()">↪</button>
-        <button class="toolbar-btn" title="Delete (Del)" (click)="deleteClicked.emit()">✕</button>
       </div>
 
-      <div class="toolbar-divider"></div>
+      @if (state.hasSelection()) {
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+          <button class="toolbar-btn danger" title="Delete (Del)" (click)="deleteClicked.emit()">✕ Delete</button>
+        </div>
+      }
+
+      @if (state.hasSelectedEdges()) {
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+          <label class="toolbar-label">Edge</label>
+          <select
+            class="toolbar-select"
+            [value]="state.selectedEdgeType() ?? 'arrow'"
+            (change)="onEdgeTypeChange($event)"
+          >
+            <option value="arrow">→ Solid</option>
+            <option value="dotted-arrow">⇢ Dashed</option>
+            <option value="thick-arrow">⇒ Thick</option>
+            <option value="open">— Open</option>
+          </select>
+        </div>
+      }
+
+      <div class="toolbar-spacer"></div>
 
       <div class="toolbar-group">
         <button class="toolbar-btn" title="Auto Layout" (click)="autoLayoutClicked.emit()">⊞ Layout</button>
         <button class="toolbar-btn" title="Fit to Page" (click)="fitClicked.emit()">⊡ Fit</button>
-      </div>
-
-      <div class="toolbar-divider"></div>
-
-      <div class="toolbar-group">
         <button class="toolbar-btn" title="Zoom In" (click)="zoomInClicked.emit()">+</button>
         <button class="toolbar-btn" title="Zoom Out" (click)="zoomOutClicked.emit()">−</button>
       </div>
@@ -65,7 +73,6 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
       background: #fff;
       border-bottom: 1px solid #e0e0e0;
       flex-shrink: 0;
-      flex-wrap: wrap;
     }
     .toolbar-group {
       display: flex;
@@ -95,6 +102,14 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
     }
     .toolbar-btn:hover {
       background: #f0f4ff;
+    }
+    .toolbar-btn.danger:hover {
+      background: #fff0f0;
+      border-color: #e0a0a0;
+      color: #c33;
+    }
+    .toolbar-spacer {
+      flex: 1;
     }
     .toolbar-divider {
       width: 1px;

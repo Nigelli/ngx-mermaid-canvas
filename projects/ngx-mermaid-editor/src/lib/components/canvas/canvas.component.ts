@@ -112,6 +112,11 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     g.getDataModel().addListener(InternalEvent.UNDO, listener);
     g.getView().addListener(InternalEvent.UNDO, listener);
 
+    // Track selection changes for contextual toolbar
+    g.getSelectionModel().addListener(InternalEvent.CHANGE, () => {
+      this.zone.run(() => this.updateSelectionState());
+    });
+
     // Listen for model changes and propagate to state
     g.getDataModel().addListener(InternalEvent.CHANGE, () => {
       if (!this.suppressEvents && this.state.changeSource() !== 'text') {
@@ -298,6 +303,24 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     this.addNode(shape, x, y);
   }
 
+  private updateSelectionState(): void {
+    const cells = this.graph.getSelectionCells();
+    const vertices = cells.filter(c => c.isVertex());
+    const edges = cells.filter(c => c.isEdge());
+    this.state.selectionCount.set(cells.length);
+    this.state.hasSelectedVertices.set(vertices.length > 0);
+    this.state.hasSelectedEdges.set(edges.length > 0);
+
+    // If exactly one edge type is selected, show it in the dropdown
+    if (edges.length > 0) {
+      const types = edges.map(e => styleToEdgeType(e.getStyle() as CellStyle));
+      const allSame = types.every(t => t === types[0]);
+      this.state.selectedEdgeType.set(allSame ? types[0] : null);
+    } else {
+      this.state.selectedEdgeType.set(null);
+    }
+  }
+
   deleteSelected(): void {
     if (this.graph.isEnabled()) {
       this.graph.removeCells();
@@ -373,6 +396,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       parallelogram: 'I/O',
       subroutine: 'Subroutine',
       asymmetric: 'Flag',
+      hexagon: 'Prepare',
+      cylinder: 'Database',
+      trapezoid: 'Manual',
     };
     return `${labels[shape]} ${id}`;
   }

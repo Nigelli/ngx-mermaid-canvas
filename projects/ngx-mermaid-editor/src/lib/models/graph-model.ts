@@ -8,7 +8,10 @@ export type MermaidShape =
   | 'stadium'
   | 'parallelogram'
   | 'subroutine'
-  | 'asymmetric';
+  | 'asymmetric'
+  | 'hexagon'
+  | 'cylinder'
+  | 'trapezoid';
 
 export type MermaidEdgeType = 'arrow' | 'open' | 'dotted-arrow' | 'thick-arrow';
 

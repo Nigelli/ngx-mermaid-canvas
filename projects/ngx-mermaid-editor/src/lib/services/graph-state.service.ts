@@ -1,5 +1,5 @@
-import { Injectable, signal, WritableSignal } from '@angular/core';
-import { FlowchartModel, FlowDirection, createEmptyModel, FlowNode, FlowEdge, MermaidShape, cloneModel } from '../models/graph-model';
+import { Injectable, signal, computed, WritableSignal } from '@angular/core';
+import { FlowchartModel, FlowDirection, createEmptyModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType, cloneModel } from '../models/graph-model';
 import { MermaidSerializerService } from './mermaid-serializer.service';
 import { MermaidDeserializerService } from './mermaid-deserializer.service';
 import { LayoutService } from './layout.service';
@@ -18,6 +18,13 @@ export class GraphStateService {
    * The canvas effect watches this instead of changeSource (which resets too fast).
    */
   readonly textVersion: WritableSignal<number> = signal(0);
+
+  /** Selection state — updated by canvas component */
+  readonly selectionCount: WritableSignal<number> = signal(0);
+  readonly hasSelectedVertices: WritableSignal<boolean> = signal(false);
+  readonly hasSelectedEdges: WritableSignal<boolean> = signal(false);
+  readonly selectedEdgeType: WritableSignal<MermaidEdgeType | null> = signal(null);
+  readonly hasSelection = computed(() => this.selectionCount() > 0);
 
   private nodeCounter = 0;
 

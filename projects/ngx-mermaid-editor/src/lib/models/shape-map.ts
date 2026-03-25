@@ -11,6 +11,9 @@ export const MERMAID_SHAPE_SYNTAX: Record<MermaidShape, [string, string]> = {
   parallelogram: ['[/', '/]'],
   subroutine:    ['[[', ']]'],
   asymmetric:    ['>', ']'],
+  hexagon:       ['{{', '}}'],
+  cylinder:      ['[(', ')]'],
+  trapezoid:     ['[/', '\\]'],
 };
 
 /** maxGraph CellStyle overrides per Mermaid shape */
@@ -23,6 +26,9 @@ export const SHAPE_TO_STYLE: Record<MermaidShape, Partial<CellStyle>> = {
   parallelogram: { shape: 'parallelogram' },
   subroutine:    { shape: 'rectangle', strokeWidth: 2 },
   asymmetric:    { shape: 'rectangle' },
+  hexagon:       { shape: 'hexagon' },
+  cylinder:      { shape: 'cylinder3' },
+  trapezoid:     { shape: 'trapezoid', perimeter: 'trapezoidPerimeter' },
 };
 
 const BASE_STYLE: Partial<CellStyle> = {
@@ -45,6 +51,9 @@ export function styleToShape(style: CellStyle): MermaidShape {
   if (style.shape === 'rhombus') return 'diamond';
   if (style.shape === 'ellipse') return 'circle';
   if (style.shape === 'parallelogram') return 'parallelogram';
+  if (style.shape === 'hexagon') return 'hexagon';
+  if (style.shape === 'cylinder3') return 'cylinder';
+  if (style.shape === 'trapezoid') return 'trapezoid';
   if (style.rounded && (style.arcSize ?? 0) >= 50) return 'stadium';
   if (style.rounded) return 'rounded';
   if ((style.strokeWidth ?? 1) > 1 && style.shape === 'rectangle') return 'subroutine';
@@ -54,8 +63,11 @@ export function styleToShape(style: CellStyle): MermaidShape {
 /** Default sizes per shape */
 export function getDefaultSize(shape: MermaidShape): { width: number; height: number } {
   switch (shape) {
-    case 'diamond':  return { width: 100, height: 80 };
-    case 'circle':   return { width: 70, height: 70 };
-    default:         return { width: 140, height: 50 };
+    case 'diamond':   return { width: 100, height: 80 };
+    case 'circle':    return { width: 70, height: 70 };
+    case 'hexagon':   return { width: 120, height: 60 };
+    case 'cylinder':  return { width: 100, height: 70 };
+    case 'trapezoid': return { width: 140, height: 50 };
+    default:          return { width: 140, height: 50 };
   }
 }

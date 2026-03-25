@@ -1,12 +1,6 @@
 import { Component, output } from '@angular/core';
 import { MermaidShape } from '../../models/graph-model';
 
-interface ShapeOption {
-  shape: MermaidShape;
-  label: string;
-  icon: string; // SVG path or simple visual
-}
-
 @Component({
   selector: 'lib-shape-palette',
   standalone: true,
@@ -36,6 +30,16 @@ interface ShapeOption {
               @case ('stadium') {
                 <rect x="4" y="4" width="32" height="22" rx="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
               }
+              @case ('hexagon') {
+                <polygon points="10,2 30,2 38,15 30,28 10,28 2,15" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              }
+              @case ('cylinder') {
+                <path d="M8,8 Q20,2 32,8 L32,22 Q20,28 8,22 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8,8 Q20,14 32,8" fill="none" stroke="currentColor" stroke-width="1"/>
+              }
+              @case ('trapezoid') {
+                <polygon points="8,4 32,4 38,26 2,26" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              }
             }
           </svg>
           <span class="palette-label">{{ opt.label }}</span>
@@ -53,6 +57,7 @@ interface ShapeOption {
       border-right: 1px solid #e0e0e0;
       width: 80px;
       min-width: 80px;
+      overflow-y: auto;
     }
     .palette-title {
       font-size: 10px;
@@ -67,7 +72,7 @@ interface ShapeOption {
       flex-direction: column;
       align-items: center;
       gap: 2px;
-      padding: 6px 4px;
+      padding: 5px 4px;
       border: 1px solid transparent;
       border-radius: 4px;
       background: none;
@@ -93,11 +98,14 @@ interface ShapeOption {
 export class ShapePaletteComponent {
   shapeSelected = output<MermaidShape>();
 
-  shapes: ShapeOption[] = [
-    { shape: 'rectangle', label: 'Rectangle', icon: '' },
-    { shape: 'rounded', label: 'Rounded', icon: '' },
-    { shape: 'diamond', label: 'Diamond', icon: '' },
-    { shape: 'circle', label: 'Circle', icon: '' },
-    { shape: 'stadium', label: 'Stadium', icon: '' },
+  shapes: Array<{ shape: MermaidShape; label: string }> = [
+    { shape: 'rectangle', label: 'Process' },
+    { shape: 'rounded', label: 'Start/End' },
+    { shape: 'diamond', label: 'Decision' },
+    { shape: 'circle', label: 'Event' },
+    { shape: 'stadium', label: 'Terminal' },
+    { shape: 'hexagon', label: 'Prepare' },
+    { shape: 'cylinder', label: 'Database' },
+    { shape: 'trapezoid', label: 'Manual' },
   ];
 }
