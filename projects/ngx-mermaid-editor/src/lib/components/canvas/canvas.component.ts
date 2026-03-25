@@ -54,6 +54,18 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       background-image: radial-gradient(circle, #d0d0d0 1px, transparent 1px);
       background-size: 20px 20px;
     }
+    /* maxGraph inline cell editor — make it visible with a clear border */
+    :host ::ng-deep .mxCellEditor {
+      background: #fff !important;
+      border: 2px solid #4a90d9 !important;
+      border-radius: 3px;
+      padding: 2px 4px !important;
+      font-family: Inter, system-ui, sans-serif;
+      font-size: 13px;
+      outline: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      overflow: visible !important;
+    }
     .minimap {
       position: absolute;
       bottom: 8px;
@@ -222,7 +234,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       }
     };
 
-    // Double-click on empty canvas to add a node
+    // Double-click handling: empty canvas = add node, edge = edit label
     g.addListener(InternalEvent.DOUBLE_CLICK, (_sender: any, evt: EventObject) => {
       const cell = evt.getProperty('cell');
       if (!cell) {
@@ -231,7 +243,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
         const pt = g.getPointForEvent(mouseEvt);
         this.zone.run(() => this.addNode('rectangle', pt.x - 70, pt.y - 25));
         evt.consume();
+      } else if (cell.isEdge()) {
+        // Force start editing on edge — default handler may not trigger for edges
+        g.startEditingAtCell(cell);
+        evt.consume();
       }
+      // Vertices: fall through to default CellEditorHandler
     });
 
     // Define connection points on vertices (N, S, E, W)
@@ -416,10 +433,11 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
   editLabel(): void {
     const cell = this.graph.getSelectionCell();
-    if (cell) {
-      this.graph.startEditingAtCell(cell);
-    }
     this.contextMenu = null;
+    if (cell) {
+      // Delay so the context menu DOM is removed before the editor opens
+      setTimeout(() => this.graph.startEditingAtCell(cell), 50);
+    }
   }
 
   addNodeAt(x: number, y: number, shape: MermaidShape): void {
