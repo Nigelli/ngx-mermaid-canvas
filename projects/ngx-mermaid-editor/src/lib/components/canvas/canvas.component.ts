@@ -8,7 +8,7 @@ import {
 } from '@maxgraph/core';
 import { GraphStateService } from '../../services/graph-state.service';
 import { LayoutService } from '../../services/layout.service';
-import { FlowchartModel, FlowNode, FlowEdge, MermaidShape, cloneModel } from '../../models/graph-model';
+import { FlowchartModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType, cloneModel } from '../../models/graph-model';
 import { getVertexStyle, styleToShape, getDefaultSize } from '../../models/shape-map';
 import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
 
@@ -85,18 +85,24 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     // Enable rubberband selection
     new RubberBandHandler(g);
 
-    // Enable keyboard shortcuts (Delete/Backspace to remove selected cells)
+    // Keyboard shortcuts
     const keyHandler = new KeyHandler(g);
-    keyHandler.bindKey(46, () => { // Delete key
-      if (g.isEnabled()) {
-        g.removeCells();
-      }
+
+    // Delete/Backspace to remove
+    keyHandler.bindKey(46, () => g.isEnabled() && g.removeCells());
+    keyHandler.bindKey(8, () => g.isEnabled() && g.removeCells());
+
+    // Ctrl+Z undo, Ctrl+Y redo
+    keyHandler.bindControlKey(90, () => this.undo());  // Ctrl+Z
+    keyHandler.bindControlKey(89, () => this.redo());  // Ctrl+Y
+
+    // Ctrl+A select all
+    keyHandler.bindControlKey(65, () => {
+      g.selectAll();
     });
-    keyHandler.bindKey(8, () => { // Backspace key
-      if (g.isEnabled()) {
-        g.removeCells();
-      }
-    });
+
+    // Ctrl+Shift+Z redo (alternative)
+    keyHandler.bindControlShiftKey(90, () => this.redo());
 
     // Setup undo manager
     this.undoManager = new UndoManager();
@@ -127,7 +133,19 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       }
     };
 
-    // Define connection points on vertices (N, S, E, W + corners)
+    // Double-click on empty canvas to add a node
+    g.addListener(InternalEvent.DOUBLE_CLICK, (_sender: any, evt: EventObject) => {
+      const cell = evt.getProperty('cell');
+      if (!cell) {
+        // Clicked on empty canvas — add a rectangle at click position
+        const mouseEvt = evt.getProperty('event') as MouseEvent;
+        const pt = g.getPointForEvent(mouseEvt);
+        this.zone.run(() => this.addNode('rectangle', pt.x - 70, pt.y - 25));
+        evt.consume();
+      }
+    });
+
+    // Define connection points on vertices (N, S, E, W)
     g.getAllConnectionConstraints = (terminal) => {
       if (terminal?.cell?.isVertex()) {
         return [
@@ -284,6 +302,19 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     if (this.graph.isEnabled()) {
       this.graph.removeCells();
     }
+  }
+
+  /** Apply an edge type to all selected edges */
+  setEdgeType(type: MermaidEdgeType): void {
+    const cells = this.graph.getSelectionCells().filter(c => c.isEdge());
+    if (cells.length === 0) return;
+
+    const style = getEdgeStyle(type);
+    this.graph.batchUpdate(() => {
+      for (const cell of cells) {
+        this.graph.setCellStyle(style, [cell]);
+      }
+    });
   }
 
   undo(): void {

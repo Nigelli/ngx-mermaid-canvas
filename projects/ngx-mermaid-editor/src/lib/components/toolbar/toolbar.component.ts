@@ -1,6 +1,6 @@
 import { Component, output, inject } from '@angular/core';
 import { GraphStateService } from '../../services/graph-state.service';
-import { FlowDirection } from '../../models/graph-model';
+import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
 
 @Component({
   selector: 'lib-toolbar',
@@ -24,9 +24,21 @@ import { FlowDirection } from '../../models/graph-model';
       <div class="toolbar-divider"></div>
 
       <div class="toolbar-group">
-        <button class="toolbar-btn" title="Undo" (click)="undoClicked.emit()">↩</button>
-        <button class="toolbar-btn" title="Redo" (click)="redoClicked.emit()">↪</button>
-        <button class="toolbar-btn" title="Delete Selected" (click)="deleteClicked.emit()">✕ Delete</button>
+        <label class="toolbar-label">Edge</label>
+        <select class="toolbar-select" (change)="onEdgeTypeChange($event)">
+          <option value="arrow">→ Solid</option>
+          <option value="dotted-arrow">⇢ Dashed</option>
+          <option value="thick-arrow">⇒ Thick</option>
+          <option value="open">— Open</option>
+        </select>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <div class="toolbar-group">
+        <button class="toolbar-btn" title="Undo (Ctrl+Z)" (click)="undoClicked.emit()">↩</button>
+        <button class="toolbar-btn" title="Redo (Ctrl+Y)" (click)="redoClicked.emit()">↪</button>
+        <button class="toolbar-btn" title="Delete (Del)" (click)="deleteClicked.emit()">✕</button>
       </div>
 
       <div class="toolbar-divider"></div>
@@ -53,6 +65,7 @@ import { FlowDirection } from '../../models/graph-model';
       background: #fff;
       border-bottom: 1px solid #e0e0e0;
       flex-shrink: 0;
+      flex-wrap: wrap;
     }
     .toolbar-group {
       display: flex;
@@ -101,9 +114,15 @@ export class ToolbarComponent {
   fitClicked = output<void>();
   zoomInClicked = output<void>();
   zoomOutClicked = output<void>();
+  edgeTypeChanged = output<MermaidEdgeType>();
 
   onDirectionChange(event: Event): void {
     const dir = (event.target as HTMLSelectElement).value as FlowDirection;
     this.state.setDirection(dir);
+  }
+
+  onEdgeTypeChange(event: Event): void {
+    const type = (event.target as HTMLSelectElement).value as MermaidEdgeType;
+    this.edgeTypeChanged.emit(type);
   }
 }
