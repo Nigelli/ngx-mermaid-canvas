@@ -32,6 +32,8 @@ export function getEdgeStyle(type: MermaidEdgeType): Partial<CellStyle> {
 export function styleToEdgeType(style: CellStyle): MermaidEdgeType {
   if (style.dashed) return 'dotted-arrow';
   if ((style.strokeWidth ?? 1) >= 3) return 'thick-arrow';
-  if (style.endArrow === 'none' || !style.endArrow) return 'open';
+  // Only treat as 'open' if endArrow is explicitly 'none'.
+  // Missing endArrow means the edge inherits from the stylesheet default (which is 'classic' = arrow).
+  if (style.endArrow === 'none') return 'open';
   return 'arrow';
 }

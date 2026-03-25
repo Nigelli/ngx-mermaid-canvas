@@ -1,6 +1,6 @@
 import {
   Component, ElementRef, ViewChild, AfterViewInit, OnDestroy,
-  inject, effect, output, NgZone, Injector, runInInjectionContext,
+  inject, effect, output, NgZone, Injector, runInInjectionContext, ChangeDetectorRef,
 } from '@angular/core';
 import {
   Graph, InternalEvent, UndoManager, RubberBandHandler, KeyHandler, Cell, CellStyle,
@@ -24,19 +24,22 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
           <button class="ctx-item" (mousedown)="editLabel()">Edit Label</button>
           @if (contextMenu.isEdge) {
             <div class="ctx-divider"></div>
-            <button class="ctx-item" (mousedown)="setEdgeType('arrow')">→ Solid Arrow</button>
-            <button class="ctx-item" (mousedown)="setEdgeType('dotted-arrow')">⇢ Dashed Arrow</button>
-            <button class="ctx-item" (mousedown)="setEdgeType('thick-arrow')">⇒ Thick Arrow</button>
-            <button class="ctx-item" (mousedown)="setEdgeType('open')">— No Arrow</button>
+            <button class="ctx-item" (mousedown)="setEdgeType('arrow'); closeContextMenu()">→ Solid Arrow</button>
+            <button class="ctx-item" (mousedown)="setEdgeType('dotted-arrow'); closeContextMenu()">⇢ Dashed Arrow</button>
+            <button class="ctx-item" (mousedown)="setEdgeType('thick-arrow'); closeContextMenu()">⇒ Thick Arrow</button>
+            <button class="ctx-item" (mousedown)="setEdgeType('open'); closeContextMenu()">— No Arrow</button>
           }
           <div class="ctx-divider"></div>
-          <button class="ctx-item danger" (mousedown)="deleteSelected()">Delete</button>
+          <button class="ctx-item" (mousedown)="copyFromContext()">Copy</button>
+          <button class="ctx-item danger" (mousedown)="deleteSelected(); closeContextMenu()">Delete</button>
         } @else {
           <button class="ctx-item" (mousedown)="addNodeAt(contextMenu.graphX, contextMenu.graphY, 'rectangle')">Add Process</button>
           <button class="ctx-item" (mousedown)="addNodeAt(contextMenu.graphX, contextMenu.graphY, 'diamond')">Add Decision</button>
           <button class="ctx-item" (mousedown)="addNodeAt(contextMenu.graphX, contextMenu.graphY, 'rounded')">Add Start/End</button>
-          <div class="ctx-divider"></div>
-          <button class="ctx-item" (mousedown)="pasteAtContext()">Paste</button>
+          @if (clipboardCells.length > 0) {
+            <div class="ctx-divider"></div>
+            <button class="ctx-item" (mousedown)="pasteAtContext()">Paste</button>
+          }
         }
       </div>
     }
@@ -65,6 +68,14 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       outline: none;
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
       overflow: visible !important;
+    }
+    /* Rubberband (drag-to-select) rectangle */
+    :host ::ng-deep .mxRubberband {
+      position: absolute;
+      background: rgba(74, 144, 217, 0.12);
+      border: 1.5px solid rgba(74, 144, 217, 0.6);
+      border-radius: 2px;
+      pointer-events: none;
     }
     .minimap {
       position: absolute;
@@ -117,13 +128,15 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   private graph!: Graph;
   private undoManager!: UndoManager;
   private suppressEvents = false;
-  contextMenu: { x: number; y: number; cell: Cell | null; isEdge: boolean; graphX: number; graphY: number } | null = null;
+  contextMenu: { x: number; y: number; cell: Cell | null; isEdge: boolean; graphX: number; graphY: number; selectedCells: Cell[] } | null = null;
+  clipboardCells: Cell[] = [];
   private documentListeners: Array<() => void> = [];
 
   private state = inject(GraphStateService);
   private layoutService = inject(LayoutService);
   private zone = inject(NgZone);
   private injector = inject(Injector);
+  private cdr = inject(ChangeDetectorRef);
 
   ngAfterViewInit(): void {
     this.zone.runOutsideAngular(() => this.initGraph());
@@ -150,17 +163,30 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     // Suppress browser context menu — we handle it ourselves via onContextMenu()
     container.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // Close context menu on any left-click anywhere
-    const closeContextMenu = (e: MouseEvent) => {
+    // Close context menu on any click outside it.
+    // Two listeners work together:
+    // 1) Capture-phase on the container — fires for canvas clicks before maxGraph
+    //    can stopPropagation(). The context menu is a sibling of the container,
+    //    so menu clicks never reach this listener — no filtering needed.
+    // 2) Capture-phase on document — catches clicks outside the component entirely
+    //    (toolbar, text editor, preview). Must check target isn't inside the menu.
+    const dismissContextMenu = () => {
       if (this.contextMenu) {
-        const target = e.target as HTMLElement;
-        if (target.closest('.context-menu')) return;
-        this.zone.run(() => this.contextMenu = null);
+        this.contextMenu = null;
+        this.cdr.detectChanges();
       }
     };
-    document.addEventListener('mousedown', closeContextMenu);
+    container.addEventListener('mousedown', dismissContextMenu, true);
+
+    const dismissIfOutsideMenu = (e: MouseEvent) => {
+      if (this.contextMenu && !(e.target as HTMLElement).closest('.context-menu')) {
+        this.contextMenu = null;
+        this.cdr.detectChanges();
+      }
+    };
+    document.addEventListener('mousedown', dismissIfOutsideMenu, true);
     this.documentListeners.push(
-      () => document.removeEventListener('mousedown', closeContextMenu),
+      () => document.removeEventListener('mousedown', dismissIfOutsideMenu, true),
     );
 
     this.graph = new Graph(container);
@@ -199,6 +225,13 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
     // Ctrl+Shift+Z redo (alternative)
     keyHandler.bindControlShiftKey(90, () => this.redo());
+
+    // Ctrl/Cmd+C copy, Ctrl/Cmd+V paste
+    keyHandler.bindControlKey(67, () => this.copyCells());  // C
+    keyHandler.bindControlKey(86, () => this.zone.run(() => this.pasteCells()));  // V
+
+    // Override isControlDown to also recognize Cmd (metaKey) on Mac
+    (keyHandler as any).isControlDown = (evt: KeyboardEvent) => evt.ctrlKey || evt.metaKey;
 
     // Setup undo manager
     this.undoManager = new UndoManager();
@@ -418,9 +451,14 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     const pt = this.graph.getPointForEvent(event);
     const cell = this.graph.getCellAt(event.offsetX, event.offsetY);
 
-    if (cell) {
+    if (cell && !this.graph.getSelectionCells().includes(cell)) {
+      // Only change selection if the right-clicked cell isn't already selected
+      // (preserves multiselect when right-clicking within a selection)
       this.graph.setSelectionCell(cell);
     }
+
+    // Snapshot the selection at context menu open time
+    const selectedCells = this.graph.getSelectionCells();
 
     this.contextMenu = {
       x, y,
@@ -428,7 +466,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       isEdge: cell?.isEdge() ?? false,
       graphX: pt.x - 70,
       graphY: pt.y - 25,
+      selectedCells,
     };
+  }
+
+  closeContextMenu(): void {
+    this.contextMenu = null;
   }
 
   editLabel(): void {
@@ -445,8 +488,51 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     this.contextMenu = null;
   }
 
+  /** Copy cells from context menu — uses the selection snapshot taken when the menu opened */
+  copyFromContext(): void {
+    const cells = this.contextMenu?.selectedCells ?? [];
+    if (cells.length > 0) {
+      this.clipboardCells = this.graph.cloneCells(cells);
+    }
+    this.contextMenu = null;
+  }
+
+  /** Copy currently selected cells (for keyboard shortcut) */
+  copyCells(): void {
+    const cells = this.graph.getSelectionCells();
+    if (cells.length > 0) {
+      this.clipboardCells = this.graph.cloneCells(cells);
+    }
+  }
+
+  /** Paste clipboard cells at an offset from their original position */
+  pasteCells(offsetX = 20, offsetY = 20): void {
+    if (this.clipboardCells.length === 0) return;
+    const g = this.graph;
+    const clones = g.cloneCells(this.clipboardCells);
+    g.getDataModel().beginUpdate();
+    try {
+      for (const cell of clones) {
+        const geo = cell.getGeometry();
+        if (geo) {
+          geo.x += offsetX;
+          geo.y += offsetY;
+        }
+        g.addCell(cell);
+      }
+    } finally {
+      g.getDataModel().endUpdate();
+    }
+    g.setSelectionCells(clones);
+  }
+
+  /** Paste at the position where the context menu was opened */
   pasteAtContext(): void {
-    // Simple paste: duplicate selected cells at context menu position
+    if (this.clipboardCells.length === 0) return;
+    const firstGeo = this.clipboardCells[0]?.getGeometry();
+    const offsetX = this.contextMenu ? this.contextMenu.graphX - (firstGeo?.x ?? 0) : 20;
+    const offsetY = this.contextMenu ? this.contextMenu.graphY - (firstGeo?.y ?? 0) : 20;
+    this.pasteCells(offsetX, offsetY);
     this.contextMenu = null;
   }
 
