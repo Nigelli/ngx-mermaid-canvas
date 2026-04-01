@@ -1,59 +1,101 @@
-# DrawioMermaid
+# ngx-mermaid-canvas
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 19.2.22.
+> **Early-stage project** — this library is under active development and is not yet production-ready. APIs may change without notice. Contributions, ideas, and bug reports are very welcome, but please be aware that responses and reviews may be slow. If you're looking for a battle-tested solution, this isn't it yet — but if you're happy to experiment and help shape the direction, pull up a chair!
 
-## Development server
+A visual flowchart editor for Angular that outputs [Mermaid](https://mermaid.js.org/) syntax. Drag, drop, and connect nodes on a canvas — get valid Mermaid code out the other side.
 
-To start a local development server, run:
+<!-- TODO: Add screenshot or GIF here -->
 
-```bash
-ng serve
-```
+## Features
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+- Visual drag-and-drop flowchart canvas (powered by [maxGraph](https://github.com/maxGraph/maxGraph))
+- Bidirectional sync — edit visually or write Mermaid text directly
+- Live Mermaid preview panel
+- 11 node shapes: rectangle, rounded, diamond, circle, stadium, parallelogram, subroutine, asymmetric, hexagon, cylinder, trapezoid
+- 4 edge types: solid arrow, dashed arrow, thick arrow, open (no arrow)
+- Edge labels
+- Auto-layout (via [dagre](https://github.com/dagrejs/dagre))
+- Undo/redo, copy/paste, keyboard shortcuts
+- Shape palette, context menus, minimap
+- Configurable panels — show/hide text editor, preview, and palette independently
 
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
-```
-
-## Building
-
-To build the project run:
+## Installation
 
 ```bash
-ng build
+npm install ngx-mermaid-editor
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
-
-## Running unit tests
-
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+### Peer dependencies
 
 ```bash
-ng test
+npm install @angular/common @angular/core @maxgraph/core mermaid
 ```
 
-## Running end-to-end tests
+## Usage
 
-For end-to-end (e2e) testing, run:
+```typescript
+import { MermaidEditorComponent } from 'ngx-mermaid-editor';
 
-```bash
-ng e2e
+@Component({
+  imports: [MermaidEditorComponent],
+  template: `
+    <ngx-mermaid-editor
+      [mermaidText]="code"
+      (mermaidTextChange)="onCodeChange($event)"
+    />
+  `,
+  styles: `:host { display: block; height: 600px; }`,
+})
+export class MyComponent {
+  code = 'graph TD\n  A[Start] --> B[End]';
+
+  onCodeChange(mermaid: string) {
+    console.log(mermaid);
+  }
+}
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+## API
 
-## Additional Resources
+### Inputs
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+| Input            | Type            | Default | Description                          |
+| ---------------- | --------------- | ------- | ------------------------------------ |
+| `mermaidText`    | `string`        | `''`    | Initial Mermaid flowchart syntax     |
+| `direction`      | `FlowDirection` | `'TD'`  | Graph direction: `TD`, `LR`, `RL`, `BT` |
+| `showTextEditor` | `boolean`       | `true`  | Show the Mermaid text editor panel   |
+| `showPreview`    | `boolean`       | `true`  | Show the live Mermaid preview panel  |
+| `showPalette`    | `boolean`       | `true`  | Show the shape palette sidebar       |
+
+### Outputs
+
+| Output              | Type             | Description                              |
+| ------------------- | ---------------- | ---------------------------------------- |
+| `mermaidTextChange`  | `string`         | Emits updated Mermaid syntax on changes  |
+| `modelChange`        | `FlowchartModel` | Emits the internal graph model on changes |
+
+### Exported types
+
+```typescript
+import type {
+  FlowchartModel, FlowNode, FlowEdge,
+  FlowDirection, MermaidShape, MermaidEdgeType,
+} from 'ngx-mermaid-editor';
+
+import { createEmptyModel, cloneModel } from 'ngx-mermaid-editor';
+```
+
+### Standalone services
+
+The serializer and deserializer are also exported if you need Mermaid conversion without the visual editor:
+
+```typescript
+import {
+  MermaidSerializerService,
+  MermaidDeserializerService,
+} from 'ngx-mermaid-editor';
+```
+
+## License
+
+[MIT](LICENSE)
