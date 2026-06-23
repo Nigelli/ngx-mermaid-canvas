@@ -42,5 +42,13 @@
     "karma-jasmine-html-reporter": "~2.1.0",
     "ng-packagr": "^19.2.0",
     "typescript": "~5.7.2"
+  },
+  "main": "./dist/ngx-mermaid-editor/fesm2022/ngx-mermaid-editor.mjs",
+  "types": "./dist/ngx-mermaid-editor/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/ngx-mermaid-editor/index.d.ts",
+      "default": "./dist/ngx-mermaid-editor/fesm2022/ngx-mermaid-editor.mjs"
+    }
   }
 }
