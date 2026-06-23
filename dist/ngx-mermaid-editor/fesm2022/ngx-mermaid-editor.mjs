@@ -382,6 +382,10 @@ class GraphStateService {
     hasSelectedEdges = signal(false);
     selectedEdgeType = signal(null);
     hasSelection = computed(() => this.selectionCount() > 0);
+    /** Current interaction mode */
+    canvasMode = signal('select');
+    /** When in connect mode, the source node ID awaiting a target click */
+    connectSource = signal(null);
     nodeCounter = 0;
     constructor(serializer, deserializer, layout) {
         this.serializer = serializer;
@@ -476,6 +480,14 @@ class CanvasComponent {
     contextMenu = null;
     clipboardCells = [];
     documentListeners = [];
+    // Pan mode state
+    isPanning = false;
+    panStartX = 0;
+    panStartY = 0;
+    panStartTranslateX = 0;
+    panStartTranslateY = 0;
+    // Connect mode state
+    connectSourceCell = null;
     state = inject(GraphStateService);
     layoutService = inject(LayoutService);
     zone = inject(NgZone);
@@ -495,6 +507,11 @@ class CanvasComponent {
                     lastTextVersion = version;
                     this.zone.runOutsideAngular(() => this.syncFromModel(model));
                 }
+            });
+            // React to mode changes
+            effect(() => {
+                const mode = this.state.canvasMode();
+                this.zone.runOutsideAngular(() => this.applyMode(mode));
             });
         });
     }
@@ -555,6 +572,10 @@ class CanvasComponent {
         // Ctrl/Cmd+C copy, Ctrl/Cmd+V paste
         keyHandler.bindControlKey(67, () => this.copyCells()); // C
         keyHandler.bindControlKey(86, () => this.zone.run(() => this.pasteCells())); // V
+        // Mode shortcuts: V=select, H=pan, E=connect
+        keyHandler.bindKey(86, () => this.zone.run(() => this.state.canvasMode.set('select'))); // V
+        keyHandler.bindKey(72, () => this.zone.run(() => this.state.canvasMode.set('pan'))); // H
+        keyHandler.bindKey(69, () => this.zone.run(() => this.state.canvasMode.set('connect'))); // E
         // Override isControlDown to also recognize Cmd (metaKey) on Mac
         keyHandler.isControlDown = (evt) => evt.ctrlKey || evt.metaKey;
         // Setup undo manager
@@ -630,6 +651,8 @@ class CanvasComponent {
         }
         // Initialize minimap
         new Outline(g, this.minimapRef.nativeElement);
+        // Setup pan and connect mode mouse handlers
+        this.setupModeHandlers(container);
     }
     /** Extract current graph state into IR and push to state service */
     extractAndPushModel() {
@@ -906,6 +929,117 @@ class CanvasComponent {
             trapezoid: 'Manual',
         };
         return `${labels[shape]} ${id}`;
+    }
+    applyMode(mode) {
+        const g = this.graph;
+        if (!g)
+            return;
+        const container = this.containerRef.nativeElement;
+        switch (mode) {
+            case 'pan':
+                g.setConnectable(false);
+                g.setCellsSelectable(false);
+                g.setCellsMovable(false);
+                container.style.cursor = 'grab';
+                this.clearConnectHighlight();
+                break;
+            case 'connect':
+                g.setConnectable(false);
+                g.setCellsSelectable(true);
+                g.setCellsMovable(false);
+                container.style.cursor = 'crosshair';
+                break;
+            default: // 'select'
+                g.setConnectable(true);
+                g.setCellsSelectable(true);
+                g.setCellsMovable(true);
+                container.style.cursor = 'default';
+                this.clearConnectHighlight();
+                break;
+        }
+    }
+    setupModeHandlers(container) {
+        // Use capture phase so pan/connect intercept before maxGraph's handlers
+        const onMouseDown = (e) => {
+            if (e.button !== 0)
+                return;
+            const mode = this.state.canvasMode();
+            if (mode === 'pan') {
+                this.isPanning = true;
+                this.panStartX = e.clientX;
+                this.panStartY = e.clientY;
+                const translate = this.graph.getView().getTranslate();
+                this.panStartTranslateX = translate.x;
+                this.panStartTranslateY = translate.y;
+                container.style.cursor = 'grabbing';
+                e.stopPropagation();
+                e.preventDefault();
+            }
+            else if (mode === 'connect') {
+                const pt = this.graph.getPointForEvent(e);
+                const cell = this.graph.getCellAt(pt.x, pt.y);
+                if (cell && cell.isVertex()) {
+                    if (!this.connectSourceCell) {
+                        this.connectSourceCell = cell;
+                        this.state.connectSource.set(cell.getId());
+                        this.highlightConnectSource(cell);
+                    }
+                    else {
+                        if (cell !== this.connectSourceCell) {
+                            this.createEdgeBetween(this.connectSourceCell, cell);
+                        }
+                        this.clearConnectHighlight();
+                        this.connectSourceCell = null;
+                        this.state.connectSource.set(null);
+                    }
+                    e.stopPropagation();
+                    e.preventDefault();
+                }
+                else if (!cell) {
+                    this.clearConnectHighlight();
+                    this.connectSourceCell = null;
+                    this.state.connectSource.set(null);
+                }
+            }
+        };
+        const onMouseMove = (e) => {
+            if (this.isPanning) {
+                const dx = e.clientX - this.panStartX;
+                const dy = e.clientY - this.panStartY;
+                const scale = this.graph.getView().getScale();
+                this.graph.getView().setTranslate(this.panStartTranslateX + dx / scale, this.panStartTranslateY + dy / scale);
+                e.preventDefault();
+            }
+        };
+        const onMouseUp = () => {
+            if (this.isPanning) {
+                this.isPanning = false;
+                if (this.state.canvasMode() === 'pan') {
+                    container.style.cursor = 'grab';
+                }
+            }
+        };
+        container.addEventListener('mousedown', onMouseDown, true);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        this.documentListeners.push(() => document.removeEventListener('mousemove', onMouseMove), () => document.removeEventListener('mouseup', onMouseUp));
+    }
+    highlightConnectSource(cell) {
+        const g = this.graph;
+        const currentStyle = cell.getStyle();
+        g.setCellStyle({ ...currentStyle, strokeColor: '#4a90d9', strokeWidth: 3 }, [cell]);
+    }
+    clearConnectHighlight() {
+        if (this.connectSourceCell) {
+            const style = getVertexStyle(styleToShape(this.connectSourceCell.getStyle()));
+            this.graph.setCellStyle(style, [this.connectSourceCell]);
+        }
+    }
+    createEdgeBetween(source, target) {
+        const g = this.graph;
+        g.batchUpdate(() => {
+            g.insertEdge(g.getDefaultParent(), null, '', source, target);
+        });
     }
     ngOnDestroy() {
         this.documentListeners.forEach(fn => fn());
@@ -1262,6 +1396,10 @@ class ToolbarComponent {
     zoomInClicked = output();
     zoomOutClicked = output();
     edgeTypeChanged = output();
+    setMode(mode) {
+        this.state.canvasMode.set(mode);
+        this.state.connectSource.set(null);
+    }
     onDirectionChange(event) {
         const dir = event.target.value;
         this.state.setDirection(dir);
@@ -1289,64 +1427,25 @@ class ToolbarComponent {
 
       <div class="toolbar-divider"></div>
 
-      <div class="toolbar-group">
-        <button class="toolbar-btn" title="Undo (Ctrl+Z)" (click)="undoClicked.emit()">↩</button>
-        <button class="toolbar-btn" title="Redo (Ctrl+Y)" (click)="redoClicked.emit()">↪</button>
-      </div>
-
-      @if (state.hasSelection()) {
-        <div class="toolbar-divider"></div>
-
-        <div class="toolbar-group">
-          <button class="toolbar-btn danger" title="Delete (Del)" (click)="deleteClicked.emit()">✕ Delete</button>
-        </div>
-      }
-
-      @if (state.hasSelectedEdges()) {
-        <div class="toolbar-divider"></div>
-
-        <div class="toolbar-group">
-          <label class="toolbar-label">Edge</label>
-          <select
-            class="toolbar-select"
-            [value]="state.selectedEdgeType() ?? 'arrow'"
-            (change)="onEdgeTypeChange($event)"
-          >
-            <option value="arrow">→ Solid</option>
-            <option value="dotted-arrow">⇢ Dashed</option>
-            <option value="thick-arrow">⇒ Thick</option>
-            <option value="open">— Open</option>
-          </select>
-        </div>
-      }
-
-      <div class="toolbar-spacer"></div>
-
-      <div class="toolbar-group">
-        <button class="toolbar-btn" title="Auto Layout" (click)="autoLayoutClicked.emit()">⊞ Layout</button>
-        <button class="toolbar-btn" title="Fit to Page" (click)="fitClicked.emit()">⊡ Fit</button>
-        <button class="toolbar-btn" title="Zoom In" (click)="zoomInClicked.emit()">+</button>
-        <button class="toolbar-btn" title="Zoom Out" (click)="zoomOutClicked.emit()">−</button>
-      </div>
-    </div>
-  `, isInline: true, styles: [".toolbar{display:flex;align-items:center;gap:4px;padding:6px 12px;background:#fff;border-bottom:1px solid #e0e0e0;flex-shrink:0}.toolbar-group{display:flex;align-items:center;gap:4px}.toolbar-label{font-size:11px;color:#666;margin-right:4px}.toolbar-select{font-size:12px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;background:#fff}.toolbar-btn{padding:4px 10px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;transition:background .15s}.toolbar-btn:hover{background:#f0f4ff}.toolbar-btn.danger:hover{background:#fff0f0;border-color:#e0a0a0;color:#c33}.toolbar-spacer{flex:1}.toolbar-divider{width:1px;height:20px;background:#e0e0e0;margin:0 4px}\n"] });
-}
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: ToolbarComponent, decorators: [{
-            type: Component,
-            args: [{ selector: 'lib-toolbar', standalone: true, template: `
-    <div class="toolbar">
-      <div class="toolbar-group">
-        <label class="toolbar-label">Direction</label>
-        <select
-          class="toolbar-select"
-          [value]="state.model().direction"
-          (change)="onDirectionChange($event)"
-        >
-          <option value="TD">Top → Down</option>
-          <option value="LR">Left → Right</option>
-          <option value="RL">Right → Left</option>
-          <option value="BT">Bottom → Top</option>
-        </select>
+      <div class="toolbar-group mode-group">
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'select'"
+          title="Select mode (V) — click to select, drag to move"
+          (click)="setMode('select')"
+        >⊹ Select <kbd>V</kbd></button>
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'pan'"
+          title="Pan mode (H) — click and drag to move canvas"
+          (click)="setMode('pan')"
+        >✥ Pan <kbd>H</kbd></button>
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'connect'"
+          title="Connect mode (E) — click source node, then target node"
+          (click)="setMode('connect')"
+        >⤳ Connect <kbd>E</kbd></button>
       </div>
 
       <div class="toolbar-divider"></div>
@@ -1391,7 +1490,92 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
         <button class="toolbar-btn" title="Zoom Out" (click)="zoomOutClicked.emit()">−</button>
       </div>
     </div>
-  `, styles: [".toolbar{display:flex;align-items:center;gap:4px;padding:6px 12px;background:#fff;border-bottom:1px solid #e0e0e0;flex-shrink:0}.toolbar-group{display:flex;align-items:center;gap:4px}.toolbar-label{font-size:11px;color:#666;margin-right:4px}.toolbar-select{font-size:12px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;background:#fff}.toolbar-btn{padding:4px 10px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;transition:background .15s}.toolbar-btn:hover{background:#f0f4ff}.toolbar-btn.danger:hover{background:#fff0f0;border-color:#e0a0a0;color:#c33}.toolbar-spacer{flex:1}.toolbar-divider{width:1px;height:20px;background:#e0e0e0;margin:0 4px}\n"] }]
+  `, isInline: true, styles: [".toolbar{display:flex;align-items:center;gap:4px;padding:6px 12px;background:#fff;border-bottom:1px solid #e0e0e0;flex-shrink:0}.toolbar-group{display:flex;align-items:center;gap:4px}.toolbar-label{font-size:11px;color:#666;margin-right:4px}.toolbar-select{font-size:12px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;background:#fff}.toolbar-btn{padding:4px 10px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;transition:background .15s}.toolbar-btn:hover{background:#f0f4ff}.toolbar-btn.danger:hover{background:#fff0f0;border-color:#e0a0a0;color:#c33}.toolbar-spacer{flex:1}.toolbar-divider{width:1px;height:20px;background:#e0e0e0;margin:0 4px}.mode-btn.active{background:#e3edff;border-color:#4a90d9;color:#2a6ab8}kbd{display:inline-block;font-size:10px;font-family:inherit;padding:1px 4px;margin-left:4px;border:1px solid #ccc;border-radius:3px;background:#f5f5f5;color:#666;line-height:1}\n"] });
+}
+i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: ToolbarComponent, decorators: [{
+            type: Component,
+            args: [{ selector: 'lib-toolbar', standalone: true, template: `
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <label class="toolbar-label">Direction</label>
+        <select
+          class="toolbar-select"
+          [value]="state.model().direction"
+          (change)="onDirectionChange($event)"
+        >
+          <option value="TD">Top → Down</option>
+          <option value="LR">Left → Right</option>
+          <option value="RL">Right → Left</option>
+          <option value="BT">Bottom → Top</option>
+        </select>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <div class="toolbar-group mode-group">
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'select'"
+          title="Select mode (V) — click to select, drag to move"
+          (click)="setMode('select')"
+        >⊹ Select <kbd>V</kbd></button>
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'pan'"
+          title="Pan mode (H) — click and drag to move canvas"
+          (click)="setMode('pan')"
+        >✥ Pan <kbd>H</kbd></button>
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'connect'"
+          title="Connect mode (E) — click source node, then target node"
+          (click)="setMode('connect')"
+        >⤳ Connect <kbd>E</kbd></button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <div class="toolbar-group">
+        <button class="toolbar-btn" title="Undo (Ctrl+Z)" (click)="undoClicked.emit()">↩</button>
+        <button class="toolbar-btn" title="Redo (Ctrl+Y)" (click)="redoClicked.emit()">↪</button>
+      </div>
+
+      @if (state.hasSelection()) {
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+          <button class="toolbar-btn danger" title="Delete (Del)" (click)="deleteClicked.emit()">✕ Delete</button>
+        </div>
+      }
+
+      @if (state.hasSelectedEdges()) {
+        <div class="toolbar-divider"></div>
+
+        <div class="toolbar-group">
+          <label class="toolbar-label">Edge</label>
+          <select
+            class="toolbar-select"
+            [value]="state.selectedEdgeType() ?? 'arrow'"
+            (change)="onEdgeTypeChange($event)"
+          >
+            <option value="arrow">→ Solid</option>
+            <option value="dotted-arrow">⇢ Dashed</option>
+            <option value="thick-arrow">⇒ Thick</option>
+            <option value="open">— Open</option>
+          </select>
+        </div>
+      }
+
+      <div class="toolbar-spacer"></div>
+
+      <div class="toolbar-group">
+        <button class="toolbar-btn" title="Auto Layout" (click)="autoLayoutClicked.emit()">⊞ Layout</button>
+        <button class="toolbar-btn" title="Fit to Page" (click)="fitClicked.emit()">⊡ Fit</button>
+        <button class="toolbar-btn" title="Zoom In" (click)="zoomInClicked.emit()">+</button>
+        <button class="toolbar-btn" title="Zoom Out" (click)="zoomOutClicked.emit()">−</button>
+      </div>
+    </div>
+  `, styles: [".toolbar{display:flex;align-items:center;gap:4px;padding:6px 12px;background:#fff;border-bottom:1px solid #e0e0e0;flex-shrink:0}.toolbar-group{display:flex;align-items:center;gap:4px}.toolbar-label{font-size:11px;color:#666;margin-right:4px}.toolbar-select{font-size:12px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;background:#fff}.toolbar-btn{padding:4px 10px;font-size:12px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;transition:background .15s}.toolbar-btn:hover{background:#f0f4ff}.toolbar-btn.danger:hover{background:#fff0f0;border-color:#e0a0a0;color:#c33}.toolbar-spacer{flex:1}.toolbar-divider{width:1px;height:20px;background:#e0e0e0;margin:0 4px}.mode-btn.active{background:#e3edff;border-color:#4a90d9;color:#2a6ab8}kbd{display:inline-block;font-size:10px;font-family:inherit;padding:1px 4px;margin-left:4px;border:1px solid #ccc;border-radius:3px;background:#f5f5f5;color:#666;line-height:1}\n"] }]
         }] });
 
 class MermaidEditorComponent {

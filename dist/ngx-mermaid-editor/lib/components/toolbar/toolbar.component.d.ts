@@ -1,4 +1,4 @@
-import { GraphStateService } from '../../services/graph-state.service';
+import { GraphStateService, CanvasMode } from '../../services/graph-state.service';
 import { MermaidEdgeType } from '../../models/graph-model';
 import * as i0 from "@angular/core";
 export declare class ToolbarComponent {
@@ -11,6 +11,7 @@ export declare class ToolbarComponent {
     zoomInClicked: import("@angular/core").OutputEmitterRef<void>;
     zoomOutClicked: import("@angular/core").OutputEmitterRef<void>;
     edgeTypeChanged: import("@angular/core").OutputEmitterRef<MermaidEdgeType>;
+    setMode(mode: CanvasMode): void;
     onDirectionChange(event: Event): void;
     onEdgeTypeChange(event: Event): void;
     static ɵfac: i0.ɵɵFactoryDeclaration<ToolbarComponent, never>;

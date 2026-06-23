@@ -1,5 +1,5 @@
 import { Component, output, inject } from '@angular/core';
-import { GraphStateService } from '../../services/graph-state.service';
+import { GraphStateService, CanvasMode } from '../../services/graph-state.service';
 import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
 
 @Component({
@@ -19,6 +19,29 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
           <option value="RL">Right → Left</option>
           <option value="BT">Bottom → Top</option>
         </select>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <div class="toolbar-group mode-group">
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'select'"
+          title="Select mode (V) — click to select, drag to move"
+          (click)="setMode('select')"
+        >⊹ Select <kbd>V</kbd></button>
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'pan'"
+          title="Pan mode (H) — click and drag to move canvas"
+          (click)="setMode('pan')"
+        >✥ Pan <kbd>H</kbd></button>
+        <button
+          class="toolbar-btn mode-btn"
+          [class.active]="state.canvasMode() === 'connect'"
+          title="Connect mode (E) — click source node, then target node"
+          (click)="setMode('connect')"
+        >⤳ Connect <kbd>E</kbd></button>
       </div>
 
       <div class="toolbar-divider"></div>
@@ -117,6 +140,23 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
       background: #e0e0e0;
       margin: 0 4px;
     }
+    .mode-btn.active {
+      background: #e3edff;
+      border-color: #4a90d9;
+      color: #2a6ab8;
+    }
+    kbd {
+      display: inline-block;
+      font-size: 10px;
+      font-family: inherit;
+      padding: 1px 4px;
+      margin-left: 4px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      background: #f5f5f5;
+      color: #666;
+      line-height: 1;
+    }
   `],
 })
 export class ToolbarComponent {
@@ -130,6 +170,11 @@ export class ToolbarComponent {
   zoomInClicked = output<void>();
   zoomOutClicked = output<void>();
   edgeTypeChanged = output<MermaidEdgeType>();
+
+  setMode(mode: CanvasMode): void {
+    this.state.canvasMode.set(mode);
+    this.state.connectSource.set(null);
+  }
 
   onDirectionChange(event: Event): void {
     const dir = (event.target as HTMLSelectElement).value as FlowDirection;

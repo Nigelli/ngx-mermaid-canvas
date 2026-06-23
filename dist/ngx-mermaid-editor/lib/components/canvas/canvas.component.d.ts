@@ -19,6 +19,12 @@ export declare class CanvasComponent implements AfterViewInit, OnDestroy {
     } | null;
     clipboardCells: Cell[];
     private documentListeners;
+    private isPanning;
+    private panStartX;
+    private panStartY;
+    private panStartTranslateX;
+    private panStartTranslateY;
+    private connectSourceCell;
     private state;
     private layoutService;
     private zone;
@@ -57,6 +63,11 @@ export declare class CanvasComponent implements AfterViewInit, OnDestroy {
     zoomOut(): void;
     fitToPage(): void;
     private defaultLabel;
+    private applyMode;
+    private setupModeHandlers;
+    private highlightConnectSource;
+    private clearConnectHighlight;
+    private createEdgeBetween;
     ngOnDestroy(): void;
     static ɵfac: i0.ɵɵFactoryDeclaration<CanvasComponent, never>;
     static ɵcmp: i0.ɵɵComponentDeclaration<CanvasComponent, "lib-canvas", never, {}, {}, never, never, true, never>;

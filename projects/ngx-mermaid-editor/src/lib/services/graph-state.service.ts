@@ -5,6 +5,7 @@ import { MermaidDeserializerService } from './mermaid-deserializer.service';
 import { LayoutService } from './layout.service';
 
 export type ChangeSource = 'canvas' | 'text' | 'none';
+export type CanvasMode = 'select' | 'pan' | 'connect';
 
 @Injectable({ providedIn: 'root' })
 export class GraphStateService {
@@ -25,6 +26,12 @@ export class GraphStateService {
   readonly hasSelectedEdges: WritableSignal<boolean> = signal(false);
   readonly selectedEdgeType: WritableSignal<MermaidEdgeType | null> = signal(null);
   readonly hasSelection = computed(() => this.selectionCount() > 0);
+
+  /** Current interaction mode */
+  readonly canvasMode: WritableSignal<CanvasMode> = signal('select');
+
+  /** When in connect mode, the source node ID awaiting a target click */
+  readonly connectSource: WritableSignal<string | null> = signal(null);
 
   private nodeCounter = 0;
 

@@ -132,6 +132,16 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   clipboardCells: Cell[] = [];
   private documentListeners: Array<() => void> = [];
 
+  // Pan mode state
+  private isPanning = false;
+  private panStartX = 0;
+  private panStartY = 0;
+  private panStartTranslateX = 0;
+  private panStartTranslateY = 0;
+
+  // Connect mode state
+  private connectSourceCell: Cell | null = null;
+
   private state = inject(GraphStateService);
   private layoutService = inject(LayoutService);
   private zone = inject(NgZone);
@@ -153,6 +163,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
           lastTextVersion = version;
           this.zone.runOutsideAngular(() => this.syncFromModel(model));
         }
+      });
+
+      // React to mode changes
+      effect(() => {
+        const mode = this.state.canvasMode();
+        this.zone.runOutsideAngular(() => this.applyMode(mode));
       });
     });
   }
@@ -229,6 +245,11 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     // Ctrl/Cmd+C copy, Ctrl/Cmd+V paste
     keyHandler.bindControlKey(67, () => this.copyCells());  // C
     keyHandler.bindControlKey(86, () => this.zone.run(() => this.pasteCells()));  // V
+
+    // Mode shortcuts: V=select, H=pan, E=connect
+    keyHandler.bindKey(86, () => this.zone.run(() => this.state.canvasMode.set('select')));  // V
+    keyHandler.bindKey(72, () => this.zone.run(() => this.state.canvasMode.set('pan')));     // H
+    keyHandler.bindKey(69, () => this.zone.run(() => this.state.canvasMode.set('connect'))); // E
 
     // Override isControlDown to also recognize Cmd (metaKey) on Mac
     (keyHandler as any).isControlDown = (evt: KeyboardEvent) => evt.ctrlKey || evt.metaKey;
@@ -314,6 +335,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
     // Initialize minimap
     new Outline(g, this.minimapRef.nativeElement);
+
+    // Setup pan and connect mode mouse handlers
+    this.setupModeHandlers(container);
   }
 
   /** Extract current graph state into IR and push to state service */
@@ -634,6 +658,128 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       trapezoid: 'Manual',
     };
     return `${labels[shape]} ${id}`;
+  }
+
+  private applyMode(mode: string): void {
+    const g = this.graph;
+    if (!g) return;
+    const container = this.containerRef.nativeElement;
+
+    switch (mode) {
+      case 'pan':
+        g.setConnectable(false);
+        g.setCellsSelectable(false);
+        g.setCellsMovable(false);
+        container.style.cursor = 'grab';
+        this.clearConnectHighlight();
+        break;
+      case 'connect':
+        g.setConnectable(false);
+        g.setCellsSelectable(true);
+        g.setCellsMovable(false);
+        container.style.cursor = 'crosshair';
+        break;
+      default: // 'select'
+        g.setConnectable(true);
+        g.setCellsSelectable(true);
+        g.setCellsMovable(true);
+        container.style.cursor = 'default';
+        this.clearConnectHighlight();
+        break;
+    }
+  }
+
+  private setupModeHandlers(container: HTMLDivElement): void {
+    // Use capture phase so pan/connect intercept before maxGraph's handlers
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const mode = this.state.canvasMode();
+
+      if (mode === 'pan') {
+        this.isPanning = true;
+        this.panStartX = e.clientX;
+        this.panStartY = e.clientY;
+        const translate = this.graph.getView().getTranslate();
+        this.panStartTranslateX = translate.x;
+        this.panStartTranslateY = translate.y;
+        container.style.cursor = 'grabbing';
+        e.stopPropagation();
+        e.preventDefault();
+      } else if (mode === 'connect') {
+        const pt = this.graph.getPointForEvent(e);
+        const cell = this.graph.getCellAt(pt.x, pt.y);
+        if (cell && cell.isVertex()) {
+          if (!this.connectSourceCell) {
+            this.connectSourceCell = cell;
+            this.state.connectSource.set(cell.getId());
+            this.highlightConnectSource(cell);
+          } else {
+            if (cell !== this.connectSourceCell) {
+              this.createEdgeBetween(this.connectSourceCell, cell);
+            }
+            this.clearConnectHighlight();
+            this.connectSourceCell = null;
+            this.state.connectSource.set(null);
+          }
+          e.stopPropagation();
+          e.preventDefault();
+        } else if (!cell) {
+          this.clearConnectHighlight();
+          this.connectSourceCell = null;
+          this.state.connectSource.set(null);
+        }
+      }
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (this.isPanning) {
+        const dx = e.clientX - this.panStartX;
+        const dy = e.clientY - this.panStartY;
+        const scale = this.graph.getView().getScale();
+        this.graph.getView().setTranslate(
+          this.panStartTranslateX + dx / scale,
+          this.panStartTranslateY + dy / scale,
+        );
+        e.preventDefault();
+      }
+    };
+
+    const onMouseUp = () => {
+      if (this.isPanning) {
+        this.isPanning = false;
+        if (this.state.canvasMode() === 'pan') {
+          container.style.cursor = 'grab';
+        }
+      }
+    };
+
+    container.addEventListener('mousedown', onMouseDown, true);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    this.documentListeners.push(
+      () => document.removeEventListener('mousemove', onMouseMove),
+      () => document.removeEventListener('mouseup', onMouseUp),
+    );
+  }
+
+  private highlightConnectSource(cell: Cell): void {
+    const g = this.graph;
+    const currentStyle = cell.getStyle() as CellStyle;
+    g.setCellStyle({ ...currentStyle, strokeColor: '#4a90d9', strokeWidth: 3 }, [cell]);
+  }
+
+  private clearConnectHighlight(): void {
+    if (this.connectSourceCell) {
+      const style = getVertexStyle(styleToShape(this.connectSourceCell.getStyle() as CellStyle));
+      this.graph.setCellStyle(style, [this.connectSourceCell]);
+    }
+  }
+
+  private createEdgeBetween(source: Cell, target: Cell): void {
+    const g = this.graph;
+    g.batchUpdate(() => {
+      g.insertEdge(g.getDefaultParent(), null, '', source, target);
+    });
   }
 
   ngOnDestroy(): void {
