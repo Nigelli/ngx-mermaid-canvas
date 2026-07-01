@@ -143,6 +143,19 @@ export class MermaidEditorComponent implements OnInit, AfterViewInit {
       this.state.initFromText(initial);
     }
     this.state.disabled.set(this.disabled());
+
+    runInInjectionContext(this.injector, () => {
+      effect(() => {
+        const text = this.mermaidText();
+        const current = this.state.mermaidText();
+        if (text !== current) {
+          this.state.initFromText(text || '');
+        }
+      });
+      effect(() => {
+        this.state.disabled.set(this.disabled());
+      });
+    });
   }
 
   ngAfterViewInit(): void {
