@@ -17,6 +17,7 @@ export declare class MermaidEditorComponent implements OnInit, AfterViewInit {
     private state;
     private injector;
     private elRef;
+    private lastExternalText;
     ngOnInit(): void;
     ngAfterViewInit(): void;
     onShapeSelected(shape: MermaidShape): void;

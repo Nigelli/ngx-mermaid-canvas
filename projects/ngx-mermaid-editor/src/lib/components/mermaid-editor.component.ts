@@ -136,9 +136,11 @@ export class MermaidEditorComponent implements OnInit, AfterViewInit {
   private state = inject(GraphStateService);
   private injector = inject(Injector);
   private elRef = inject(ElementRef);
+  private lastExternalText = '';
 
   ngOnInit(): void {
     const initial = this.mermaidText();
+    this.lastExternalText = initial;
     if (initial) {
       this.state.initFromText(initial);
     }
@@ -147,8 +149,8 @@ export class MermaidEditorComponent implements OnInit, AfterViewInit {
     runInInjectionContext(this.injector, () => {
       effect(() => {
         const text = this.mermaidText();
-        const current = this.state.mermaidText();
-        if (text !== current) {
+        if (text !== this.lastExternalText) {
+          this.lastExternalText = text;
           this.state.initFromText(text || '');
         }
       });
