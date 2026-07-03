@@ -416,6 +416,12 @@ class GraphStateService {
     }
     /** Set initial state from input binding */
     initFromText(text) {
+        if (!text || !text.trim()) {
+            this.model.set(createEmptyModel());
+            this.mermaidText.set('');
+            this.nodeCounter = 0;
+            return;
+        }
         const parsed = this.deserializer.deserialize(text);
         if (!parsed)
             return;
@@ -466,11 +472,10 @@ class GraphStateService {
         return result - 1;
     }
     static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: GraphStateService, deps: [{ token: MermaidSerializerService }, { token: MermaidDeserializerService }, { token: LayoutService }], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: GraphStateService, providedIn: 'root' });
+    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: GraphStateService });
 }
 i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: GraphStateService, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
+            type: Injectable
         }], ctorParameters: () => [{ type: MermaidSerializerService }, { type: MermaidDeserializerService }, { type: LayoutService }] });
 
 class CanvasComponent {
@@ -1670,7 +1675,7 @@ class MermaidEditorComponent {
         document.addEventListener('mouseup', onUp);
     }
     static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: MermaidEditorComponent, deps: [], target: i0.ɵɵFactoryTarget.Component });
-    static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "19.2.20", type: MermaidEditorComponent, isStandalone: true, selector: "ngx-mermaid-editor", inputs: { mermaidText: { classPropertyName: "mermaidText", publicName: "mermaidText", isSignal: true, isRequired: false, transformFunction: null }, direction: { classPropertyName: "direction", publicName: "direction", isSignal: true, isRequired: false, transformFunction: null }, showTextEditor: { classPropertyName: "showTextEditor", publicName: "showTextEditor", isSignal: true, isRequired: false, transformFunction: null }, showPreview: { classPropertyName: "showPreview", publicName: "showPreview", isSignal: true, isRequired: false, transformFunction: null }, showPalette: { classPropertyName: "showPalette", publicName: "showPalette", isSignal: true, isRequired: false, transformFunction: null }, disabled: { classPropertyName: "disabled", publicName: "disabled", isSignal: true, isRequired: false, transformFunction: null } }, outputs: { mermaidTextChange: "mermaidTextChange", modelChange: "modelChange" }, viewQueries: [{ propertyName: "canvasRef", first: true, predicate: ["canvas"], descendants: true }], ngImport: i0, template: `
+    static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "19.2.20", type: MermaidEditorComponent, isStandalone: true, selector: "ngx-mermaid-editor", inputs: { mermaidText: { classPropertyName: "mermaidText", publicName: "mermaidText", isSignal: true, isRequired: false, transformFunction: null }, direction: { classPropertyName: "direction", publicName: "direction", isSignal: true, isRequired: false, transformFunction: null }, showTextEditor: { classPropertyName: "showTextEditor", publicName: "showTextEditor", isSignal: true, isRequired: false, transformFunction: null }, showPreview: { classPropertyName: "showPreview", publicName: "showPreview", isSignal: true, isRequired: false, transformFunction: null }, showPalette: { classPropertyName: "showPalette", publicName: "showPalette", isSignal: true, isRequired: false, transformFunction: null }, disabled: { classPropertyName: "disabled", publicName: "disabled", isSignal: true, isRequired: false, transformFunction: null } }, outputs: { mermaidTextChange: "mermaidTextChange", modelChange: "modelChange" }, providers: [GraphStateService], viewQueries: [{ propertyName: "canvasRef", first: true, predicate: ["canvas"], descendants: true }], ngImport: i0, template: `
     <div class="editor-root" [class.disabled]="disabled()">
       @if (!disabled()) {
         <lib-toolbar
@@ -1719,7 +1724,7 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
                         TextEditorComponent,
                         PreviewComponent,
                         ToolbarComponent,
-                    ], changeDetection: ChangeDetectionStrategy.OnPush, template: `
+                    ], providers: [GraphStateService], changeDetection: ChangeDetectionStrategy.OnPush, template: `
     <div class="editor-root" [class.disabled]="disabled()">
       @if (!disabled()) {
         <lib-toolbar

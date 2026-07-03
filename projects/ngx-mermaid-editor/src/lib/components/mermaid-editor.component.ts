@@ -21,6 +21,7 @@ import { FlowchartModel, FlowDirection, MermaidShape, MermaidEdgeType } from '..
     PreviewComponent,
     ToolbarComponent,
   ],
+  providers: [GraphStateService],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="editor-root" [class.disabled]="disabled()">

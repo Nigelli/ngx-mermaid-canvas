@@ -7,7 +7,7 @@ import { LayoutService } from './layout.service';
 export type ChangeSource = 'canvas' | 'text' | 'none';
 export type CanvasMode = 'select' | 'pan' | 'connect';
 
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class GraphStateService {
 
   readonly model: WritableSignal<FlowchartModel> = signal(createEmptyModel());
@@ -68,6 +68,13 @@ export class GraphStateService {
 
   /** Set initial state from input binding */
   initFromText(text: string): void {
+    if (!text || !text.trim()) {
+      this.model.set(createEmptyModel());
+      this.mermaidText.set('');
+      this.nodeCounter = 0;
+      return;
+    }
+
     const parsed = this.deserializer.deserialize(text);
     if (!parsed) return;
 
