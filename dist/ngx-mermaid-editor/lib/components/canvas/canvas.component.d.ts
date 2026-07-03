@@ -18,6 +18,16 @@ export declare class CanvasComponent implements AfterViewInit, OnDestroy {
         graphY: number;
         selectedCells: Cell[];
     } | null;
+    radialMenu: {
+        x: number;
+        y: number;
+        graphX: number;
+        graphY: number;
+    } | null;
+    radialMenuItems: Array<{
+        shape: MermaidShape;
+        label: string;
+    }>;
     clipboardCells: Cell[];
     private documentListeners;
     private hoveredCell;
@@ -44,6 +54,8 @@ export declare class CanvasComponent implements AfterViewInit, OnDestroy {
     /** Add a node at the center of the visible area */
     addNodeAtCenter(shape: MermaidShape): void;
     onContextMenu(event: MouseEvent): void;
+    getRadialPosition(index: number): string;
+    addFromRadial(shape: MermaidShape): void;
     closeContextMenu(): void;
     editLabel(): void;
     addNodeAt(x: number, y: number, shape: MermaidShape): void;

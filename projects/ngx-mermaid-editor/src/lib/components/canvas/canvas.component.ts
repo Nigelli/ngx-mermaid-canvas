@@ -19,6 +19,32 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
     <div #graphContainer class="graph-container" (contextmenu)="onContextMenu($event)"></div>
     <svg #portOverlay class="port-overlay"></svg>
     <div #minimapContainer class="minimap"></div>
+    @if (radialMenu) {
+      <div class="radial-menu" [style.left.px]="radialMenu.x" [style.top.px]="radialMenu.y">
+        @for (item of radialMenuItems; track item.shape; let i = $index) {
+          <button
+            class="radial-item"
+            [style.transform]="getRadialPosition(i)"
+            [title]="item.label"
+            (mousedown)="addFromRadial(item.shape); $event.stopPropagation()"
+          >
+            <svg viewBox="0 0 32 24" class="radial-icon">
+              @switch (item.shape) {
+                @case ('rectangle') { <rect x="2" y="2" width="28" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('rounded') { <rect x="2" y="2" width="28" height="20" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('diamond') { <polygon points="16,1 31,12 16,23 1,12" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('circle') { <ellipse cx="16" cy="12" rx="12" ry="10" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('stadium') { <rect x="2" y="2" width="28" height="20" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('hexagon') { <polygon points="8,1 24,1 31,12 24,23 8,23 1,12" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('cylinder') { <path d="M6,6 Q16,2 26,6 L26,18 Q16,22 6,18 Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6,6 Q16,10 26,6" fill="none" stroke="currentColor" stroke-width="1"/> }
+                @case ('trapezoid') { <polygon points="6,2 26,2 30,22 2,22" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+              }
+            </svg>
+            <span class="radial-label">{{ item.label }}</span>
+          </button>
+        }
+      </div>
+    }
     @if (contextMenu) {
       <div class="context-menu" [style.left.px]="contextMenu.x" [style.top.px]="contextMenu.y">
         @if (contextMenu.cell) {
@@ -100,6 +126,44 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       overflow: hidden;
       z-index: 10;
     }
+    .radial-menu {
+      position: absolute;
+      z-index: 1000;
+      width: 0;
+      height: 0;
+    }
+    .radial-item {
+      position: absolute;
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      border: 1px solid #d0d0d0;
+      background: #fff;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+      transition: background 0.12s;
+      color: #444;
+      padding: 2px;
+    }
+    .radial-item:hover {
+      background: #f0f4ff;
+      border-color: #999;
+    }
+    .radial-icon {
+      width: 20px;
+      height: 14px;
+    }
+    .radial-label {
+      font-size: 7px;
+      line-height: 1;
+      color: #666;
+      white-space: nowrap;
+    }
     .context-menu {
       position: absolute;
       z-index: 1000;
@@ -140,6 +204,18 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   private undoManager!: UndoManager;
   private suppressEvents = false;
   contextMenu: { x: number; y: number; cell: Cell | null; isEdge: boolean; graphX: number; graphY: number; selectedCells: Cell[] } | null = null;
+  radialMenu: { x: number; y: number; graphX: number; graphY: number } | null = null;
+
+  radialMenuItems: Array<{ shape: MermaidShape; label: string }> = [
+    { shape: 'rectangle', label: 'Process' },
+    { shape: 'rounded', label: 'Start/End' },
+    { shape: 'diamond', label: 'Decision' },
+    { shape: 'circle', label: 'Event' },
+    { shape: 'stadium', label: 'Terminal' },
+    { shape: 'hexagon', label: 'Prepare' },
+    { shape: 'cylinder', label: 'Database' },
+    { shape: 'trapezoid', label: 'Manual' },
+  ];
   clipboardCells: Cell[] = [];
   private documentListeners: Array<() => void> = [];
 
@@ -211,17 +287,23 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     //    so menu clicks never reach this listener — no filtering needed.
     // 2) Capture-phase on document — catches clicks outside the component entirely
     //    (toolbar, text editor, preview). Must check target isn't inside the menu.
-    const dismissContextMenu = () => {
-      if (this.contextMenu) {
+    const dismissMenus = () => {
+      if (this.contextMenu || this.radialMenu) {
         this.contextMenu = null;
+        this.radialMenu = null;
         this.cdr.detectChanges();
       }
     };
-    container.addEventListener('mousedown', dismissContextMenu, true);
+    container.addEventListener('mousedown', dismissMenus, true);
 
     const dismissIfOutsideMenu = (e: MouseEvent) => {
-      if (this.contextMenu && !(e.target as HTMLElement).closest('.context-menu')) {
+      const target = e.target as HTMLElement;
+      if (this.contextMenu && !target.closest('.context-menu')) {
         this.contextMenu = null;
+        this.cdr.detectChanges();
+      }
+      if (this.radialMenu && !target.closest('.radial-menu')) {
+        this.radialMenu = null;
         this.cdr.detectChanges();
       }
     };
@@ -257,8 +339,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     g.setCellsEditable(true);
     g.setHtmlLabels(true);
 
-    // Snap to grid
-    g.getPlugin<any>('SelectionHandler')?.setMoveEnabled(true);
+    // Snap to grid and enable alignment guides
+    const selectionHandler = g.getPlugin<any>('SelectionHandler');
+    selectionHandler?.setMoveEnabled(true);
+    if (selectionHandler) {
+      selectionHandler.guidesEnabled = true;
+    }
 
     // Enable rubberband selection
     new RubberBandHandler(g);
@@ -348,21 +434,27 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       }
     };
 
-    // Double-click handling: empty canvas = add node, edge = edit label
+    // Double-click handling: empty canvas = show radial shape menu, edge = edit label
     g.addListener(InternalEvent.DOUBLE_CLICK, (_sender: any, evt: EventObject) => {
       const cell = evt.getProperty('cell');
       if (!cell) {
-        // Clicked on empty canvas — add a rectangle at click position
         const mouseEvt = evt.getProperty('event') as MouseEvent;
+        const rect = container.getBoundingClientRect();
         const pt = g.getPointForEvent(mouseEvt);
-        this.zone.run(() => this.addNode('rectangle', pt.x - 70, pt.y - 25));
+        this.zone.run(() => {
+          this.radialMenu = {
+            x: mouseEvt.clientX - rect.left,
+            y: mouseEvt.clientY - rect.top,
+            graphX: pt.x,
+            graphY: pt.y,
+          };
+          this.cdr.detectChanges();
+        });
         evt.consume();
       } else if (cell.isEdge()) {
-        // Force start editing on edge — default handler may not trigger for edges
         g.startEditingAtCell(cell);
         evt.consume();
       }
-      // Vertices: fall through to default CellEditorHandler
     });
 
     // Define connection points on vertices (N, S, E, W)
@@ -448,7 +540,6 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
   /** Extract current graph state into IR and push to state service */
   private extractAndPushModel(): void {
-    const model = this.graph.getDataModel();
     const parent = this.graph.getDefaultParent();
     const newModel: FlowchartModel = {
       direction: this.state.model().direction,
@@ -598,6 +689,22 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       graphY: pt.y - 25,
       selectedCells,
     };
+  }
+
+  getRadialPosition(index: number): string {
+    const total = this.radialMenuItems.length;
+    const radius = 80;
+    const angle = (index / total) * 2 * Math.PI - Math.PI / 2;
+    const x = Math.cos(angle) * radius - 22;
+    const y = Math.sin(angle) * radius - 22;
+    return `translate(${x}px, ${y}px)`;
+  }
+
+  addFromRadial(shape: MermaidShape): void {
+    if (!this.radialMenu) return;
+    const size = getDefaultSize(shape);
+    this.addNode(shape, this.radialMenu.graphX - size.width / 2, this.radialMenu.graphY - size.height / 2);
+    this.radialMenu = null;
   }
 
   closeContextMenu(): void {
@@ -834,7 +941,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       }
     };
 
-    const onMouseUp = (e: MouseEvent) => {
+    const onMouseUp = (_e: MouseEvent) => {
       if (this.isPanning) {
         this.isPanning = false;
         this.isMiddleMousePan = false;

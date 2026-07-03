@@ -2,6 +2,7 @@ import { Component, output, inject } from '@angular/core';
 import { GraphStateService, CanvasMode } from '../../services/graph-state.service';
 import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
 
+
 @Component({
   selector: 'lib-toolbar',
   standalone: true,
@@ -53,7 +54,7 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
         </div>
       }
 
-      @if (state.hasSelectedEdges()) {
+@if (state.hasSelectedEdges()) {
         <div class="toolbar-divider"></div>
 
         <div class="toolbar-group">
