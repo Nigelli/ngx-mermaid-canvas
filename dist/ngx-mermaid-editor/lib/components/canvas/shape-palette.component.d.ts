@@ -2,6 +2,7 @@ import { MermaidShape } from '../../models/graph-model';
 import * as i0 from "@angular/core";
 export declare class ShapePaletteComponent {
     shapeSelected: import("@angular/core").OutputEmitterRef<MermaidShape>;
+    onDragStart(event: DragEvent, shape: MermaidShape): void;
     shapes: Array<{
         shape: MermaidShape;
         label: string;

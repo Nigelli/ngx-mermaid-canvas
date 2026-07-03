@@ -1,11 +1,11 @@
 import { Injectable, signal, computed, WritableSignal } from '@angular/core';
-import { FlowchartModel, FlowDirection, createEmptyModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType, cloneModel } from '../models/graph-model';
+import { FlowchartModel, FlowDirection, createEmptyModel, MermaidEdgeType, cloneModel } from '../models/graph-model';
 import { MermaidSerializerService } from './mermaid-serializer.service';
 import { MermaidDeserializerService } from './mermaid-deserializer.service';
 import { LayoutService } from './layout.service';
 
 export type ChangeSource = 'canvas' | 'text' | 'none';
-export type CanvasMode = 'select' | 'pan' | 'connect';
+export type CanvasMode = 'select' | 'pan';
 
 @Injectable()
 export class GraphStateService {
@@ -29,9 +29,6 @@ export class GraphStateService {
 
   /** Current interaction mode */
   readonly canvasMode: WritableSignal<CanvasMode> = signal('select');
-
-  /** When in connect mode, the source node ID awaiting a target click */
-  readonly connectSource: WritableSignal<string | null> = signal(null);
 
   /** When true, all interaction is disabled */
   readonly disabled: WritableSignal<boolean> = signal(false);

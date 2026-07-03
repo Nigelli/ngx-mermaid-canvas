@@ -11,6 +11,8 @@ import { MermaidShape } from '../../models/graph-model';
         <button
           class="palette-item"
           [title]="opt.label"
+          draggable="true"
+          (dragstart)="onDragStart($event, opt.shape)"
           (click)="shapeSelected.emit(opt.shape)"
         >
           <svg viewBox="0 0 40 30" class="shape-icon">
@@ -97,6 +99,13 @@ import { MermaidShape } from '../../models/graph-model';
 })
 export class ShapePaletteComponent {
   shapeSelected = output<MermaidShape>();
+
+  onDragStart(event: DragEvent, shape: MermaidShape): void {
+    event.dataTransfer?.setData('application/shape', shape);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copy';
+    }
+  }
 
   shapes: Array<{ shape: MermaidShape; label: string }> = [
     { shape: 'rectangle', label: 'Process' },

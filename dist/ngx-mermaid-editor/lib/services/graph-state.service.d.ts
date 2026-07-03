@@ -5,7 +5,7 @@ import { MermaidDeserializerService } from './mermaid-deserializer.service';
 import { LayoutService } from './layout.service';
 import * as i0 from "@angular/core";
 export type ChangeSource = 'canvas' | 'text' | 'none';
-export type CanvasMode = 'select' | 'pan' | 'connect';
+export type CanvasMode = 'select' | 'pan';
 export declare class GraphStateService {
     private serializer;
     private deserializer;
@@ -26,8 +26,6 @@ export declare class GraphStateService {
     readonly hasSelection: import("@angular/core").Signal<boolean>;
     /** Current interaction mode */
     readonly canvasMode: WritableSignal<CanvasMode>;
-    /** When in connect mode, the source node ID awaiting a target click */
-    readonly connectSource: WritableSignal<string | null>;
     /** When true, all interaction is disabled */
     readonly disabled: WritableSignal<boolean>;
     private nodeCounter;

@@ -1,6 +1,6 @@
 import {
   Component, ElementRef, ViewChild, AfterViewInit, OnDestroy,
-  inject, effect, output, NgZone, Injector, runInInjectionContext, ChangeDetectorRef,
+  inject, effect, NgZone, Injector, runInInjectionContext, ChangeDetectorRef,
 } from '@angular/core';
 import {
   Graph, InternalEvent, UndoManager, RubberBandHandler, KeyHandler, Cell, CellStyle,
@@ -8,7 +8,7 @@ import {
 } from '@maxgraph/core';
 import { GraphStateService } from '../../services/graph-state.service';
 import { LayoutService } from '../../services/layout.service';
-import { FlowchartModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType, cloneModel } from '../../models/graph-model';
+import { FlowchartModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType } from '../../models/graph-model';
 import { getVertexStyle, styleToShape, getDefaultSize } from '../../models/shape-map';
 import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
 
@@ -17,6 +17,7 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
   standalone: true,
   template: `
     <div #graphContainer class="graph-container" (contextmenu)="onContextMenu($event)"></div>
+    <svg #portOverlay class="port-overlay"></svg>
     <div #minimapContainer class="minimap"></div>
     @if (contextMenu) {
       <div class="context-menu" [style.left.px]="contextMenu.x" [style.top.px]="contextMenu.y">
@@ -45,8 +46,7 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
     }
   `,
   styles: [`
-    :host { display: block; width: 100%; height: 100%; }
-    :host { position: relative; }
+    :host { display: block; width: 100%; height: 100%; position: relative; }
     .graph-container {
       width: 100%;
       height: 100%;
@@ -56,6 +56,16 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       background-color: #f8f9fa;
       background-image: radial-gradient(circle, #d0d0d0 1px, transparent 1px);
       background-size: 20px 20px;
+    }
+    .port-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+      overflow: visible;
     }
     /* maxGraph inline cell editor — make it visible with a clear border */
     :host ::ng-deep .mxCellEditor {
@@ -123,6 +133,7 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
 })
 export class CanvasComponent implements AfterViewInit, OnDestroy {
   @ViewChild('graphContainer', { static: true }) containerRef!: ElementRef<HTMLDivElement>;
+  @ViewChild('portOverlay', { static: true }) portOverlayRef!: ElementRef<SVGElement>;
   @ViewChild('minimapContainer', { static: true }) minimapRef!: ElementRef<HTMLDivElement>;
 
   private graph!: Graph;
@@ -132,15 +143,18 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   clipboardCells: Cell[] = [];
   private documentListeners: Array<() => void> = [];
 
-  // Pan mode state
+  // Port hover indicator
+  private hoveredCell: Cell | null = null;
+
+  // Pan state (mode pan, spacebar pan, or middle-click pan)
   private isPanning = false;
   private panStartX = 0;
   private panStartY = 0;
   private panStartTranslateX = 0;
   private panStartTranslateY = 0;
+  private isSpaceHeld = false;
+  private isMiddleMousePan = false;
 
-  // Connect mode state
-  private connectSourceCell: Cell | null = null;
 
   private state = inject(GraphStateService);
   private layoutService = inject(LayoutService);
@@ -241,6 +255,21 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     keyHandler.bindKey(46, () => g.isEnabled() && g.removeCells());
     keyHandler.bindKey(8, () => g.isEnabled() && g.removeCells());
 
+    // Fallback: catch Backspace/Delete at container level in case KeyHandler misses it
+    container.addEventListener('keydown', (e) => {
+      if ((e.key === 'Backspace' || e.key === 'Delete') && g.isEnabled() && !g.isEditing()) {
+        const selected = g.getSelectionCells();
+        if (selected.length > 0) {
+          e.preventDefault();
+          g.removeCells();
+        }
+      }
+    });
+    // Ensure container can receive keyboard focus
+    if (!container.getAttribute('tabindex')) {
+      container.setAttribute('tabindex', '0');
+    }
+
     // Ctrl+Z undo, Ctrl+Y redo
     keyHandler.bindControlKey(90, () => this.undo());  // Ctrl+Z
     keyHandler.bindControlKey(89, () => this.redo());  // Ctrl+Y
@@ -257,10 +286,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     keyHandler.bindControlKey(67, () => this.copyCells());  // C
     keyHandler.bindControlKey(86, () => this.zone.run(() => this.pasteCells()));  // V
 
-    // Mode shortcuts: V=select, H=pan, E=connect
+    // Mode shortcuts: V=select, H=pan
     keyHandler.bindKey(86, () => this.zone.run(() => this.state.canvasMode.set('select')));  // V
     keyHandler.bindKey(72, () => this.zone.run(() => this.state.canvasMode.set('pan')));     // H
-    keyHandler.bindKey(69, () => this.zone.run(() => this.state.canvasMode.set('connect'))); // E
 
     // Override isControlDown to also recognize Cmd (metaKey) on Mac
     (keyHandler as any).isControlDown = (evt: KeyboardEvent) => evt.ctrlKey || evt.metaKey;
@@ -272,6 +300,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     };
     g.getDataModel().addListener(InternalEvent.UNDO, listener);
     g.getView().addListener(InternalEvent.UNDO, listener);
+
+    // Clear port indicators when cells are being moved
+    g.addListener(InternalEvent.MOVE_CELLS, () => {
+      this.hoveredCell = null;
+      this.portOverlayRef.nativeElement.innerHTML = '';
+    });
 
     // Track selection changes for contextual toolbar
     g.getSelectionModel().addListener(InternalEvent.CHANGE, () => {
@@ -329,6 +363,36 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       return [];
     };
 
+    // Configure the connection handler:
+    // - Only trigger connections from the border region (not center/text area)
+    // - Show crosshair cursor when connection is possible
+    const connectionHandler = g.getPlugin('ConnectionHandler') as any;
+    if (connectionHandler) {
+      connectionHandler.connectImage = null;
+      connectionHandler.livePreview = true;
+      connectionHandler.cursor = 'crosshair';
+      connectionHandler.outlineConnect = true;
+
+      // Override: only start a connection when the mouse is near the cell border
+      const origIsStartEvent = connectionHandler.isStartEvent.bind(connectionHandler);
+      connectionHandler.isStartEvent = (me: any) => {
+        if (!origIsStartEvent(me)) return false;
+        // If we have a constraint point, we're on the border — allow it
+        if (connectionHandler.constraintHandler?.currentConstraint) return true;
+        // Otherwise check if mouse is near the edge of the cell
+        const state = connectionHandler.previous;
+        if (!state) return false;
+        const x = me.getGraphX();
+        const y = me.getGraphY();
+        const border = 12 / g.getView().getScale();
+        const nearLeft = x - state.x < border;
+        const nearRight = state.x + state.width - x < border;
+        const nearTop = y - state.y < border;
+        const nearBottom = state.y + state.height - y < border;
+        return nearLeft || nearRight || nearTop || nearBottom;
+      };
+    }
+
     // Set default edge style
     const defaultEdgeStyle = g.getStylesheet().getDefaultEdgeStyle();
     defaultEdgeStyle.endArrow = 'classic';
@@ -346,6 +410,22 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
     // Initialize minimap
     new Outline(g, this.minimapRef.nativeElement);
+
+    // Accept shape drops from the palette
+    container.addEventListener('dragover', (e) => {
+      if (e.dataTransfer?.types.includes('application/shape')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    container.addEventListener('drop', (e) => {
+      const shape = e.dataTransfer?.getData('application/shape') as MermaidShape;
+      if (!shape) return;
+      e.preventDefault();
+      const pt = g.getPointForEvent(e);
+      const size = getDefaultSize(shape);
+      this.zone.run(() => this.addNode(shape, pt.x - size.width / 2, pt.y - size.height / 2));
+    });
 
     // Setup pan and connect mode mouse handlers
     this.setupModeHandlers(container);
@@ -682,63 +762,41 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
         g.setCellsSelectable(false);
         g.setCellsMovable(false);
         container.style.cursor = 'grab';
-        this.clearConnectHighlight();
-        break;
-      case 'connect':
-        g.setConnectable(false);
-        g.setCellsSelectable(true);
-        g.setCellsMovable(false);
-        container.style.cursor = 'crosshair';
         break;
       default: // 'select'
         g.setConnectable(true);
         g.setCellsSelectable(true);
         g.setCellsMovable(true);
         container.style.cursor = 'default';
-        this.clearConnectHighlight();
         break;
     }
   }
 
   private setupModeHandlers(container: HTMLDivElement): void {
-    // Use capture phase so pan/connect intercept before maxGraph's handlers
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button !== 0) return;
-      const mode = this.state.canvasMode();
+      // Middle-click pan (works in any mode)
+      if (e.button === 1) {
+        this.startPan(e, container);
+        this.isMiddleMousePan = true;
+        e.preventDefault();
+        return;
+      }
 
-      if (mode === 'pan') {
-        this.isPanning = true;
-        this.panStartX = e.clientX;
-        this.panStartY = e.clientY;
-        const translate = this.graph.getView().getTranslate();
-        this.panStartTranslateX = translate.x;
-        this.panStartTranslateY = translate.y;
-        container.style.cursor = 'grabbing';
+      if (e.button !== 0) return;
+
+      // Spacebar temporary pan (works in any mode)
+      if (this.isSpaceHeld) {
+        this.startPan(e, container);
         e.stopPropagation();
         e.preventDefault();
-      } else if (mode === 'connect') {
-        const pt = this.graph.getPointForEvent(e);
-        const cell = this.graph.getCellAt(pt.x, pt.y);
-        if (cell && cell.isVertex()) {
-          if (!this.connectSourceCell) {
-            this.connectSourceCell = cell;
-            this.state.connectSource.set(cell.getId());
-            this.highlightConnectSource(cell);
-          } else {
-            if (cell !== this.connectSourceCell) {
-              this.createEdgeBetween(this.connectSourceCell, cell);
-            }
-            this.clearConnectHighlight();
-            this.connectSourceCell = null;
-            this.state.connectSource.set(null);
-          }
-          e.stopPropagation();
-          e.preventDefault();
-        } else if (!cell) {
-          this.clearConnectHighlight();
-          this.connectSourceCell = null;
-          this.state.connectSource.set(null);
-        }
+        return;
+      }
+
+      const mode = this.state.canvasMode();
+      if (mode === 'pan') {
+        this.startPan(e, container);
+        e.stopPropagation();
+        e.preventDefault();
       }
     };
 
@@ -752,46 +810,168 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
           this.panStartTranslateY + dy / scale,
         );
         e.preventDefault();
+        return;
+      }
+
+      // Show port dots on hover
+      if (this.state.canvasMode() === 'select' && !this.graph.isEditing()) {
+        this.updatePortHover(e);
       }
     };
 
-    const onMouseUp = () => {
+    const onMouseUp = (e: MouseEvent) => {
       if (this.isPanning) {
         this.isPanning = false;
-        if (this.state.canvasMode() === 'pan') {
+        this.isMiddleMousePan = false;
+        const currentMode = this.state.canvasMode();
+        if (this.isSpaceHeld) {
           container.style.cursor = 'grab';
+        } else if (currentMode === 'pan') {
+          container.style.cursor = 'grab';
+        } else {
+          container.style.cursor = 'default';
+        }
+        return;
+      }
+
+    };
+
+    // Scroll zoom (Ctrl/Cmd + wheel)
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const rect = container.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left;
+        const offsetY = e.clientY - rect.top;
+        this.zoomAtPoint(e.deltaY < 0, offsetX, offsetY);
+      }
+    };
+
+    // Spacebar pan
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !this.isSpaceHeld && !this.graph.isEditing()) {
+        this.isSpaceHeld = true;
+        container.style.cursor = 'grab';
+        e.preventDefault();
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        this.isSpaceHeld = false;
+        if (!this.isPanning) {
+          const mode = this.state.canvasMode();
+          container.style.cursor = mode === 'pan' ? 'grab' : 'default';
         }
       }
     };
 
     container.addEventListener('mousedown', onMouseDown, true);
+    container.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
     this.documentListeners.push(
       () => document.removeEventListener('mousemove', onMouseMove),
       () => document.removeEventListener('mouseup', onMouseUp),
+      () => document.removeEventListener('keydown', onKeyDown),
+      () => document.removeEventListener('keyup', onKeyUp),
     );
   }
 
-  private highlightConnectSource(cell: Cell): void {
-    const g = this.graph;
-    const currentStyle = cell.getStyle() as CellStyle;
-    g.setCellStyle({ ...currentStyle, strokeColor: '#4a90d9', strokeWidth: 3 }, [cell]);
+  private startPan(e: MouseEvent, container: HTMLDivElement): void {
+    this.isPanning = true;
+    this.panStartX = e.clientX;
+    this.panStartY = e.clientY;
+    const translate = this.graph.getView().getTranslate();
+    this.panStartTranslateX = translate.x;
+    this.panStartTranslateY = translate.y;
+    container.style.cursor = 'grabbing';
   }
 
-  private clearConnectHighlight(): void {
-    if (this.connectSourceCell) {
-      const style = getVertexStyle(styleToShape(this.connectSourceCell.getStyle() as CellStyle));
-      this.graph.setCellStyle(style, [this.connectSourceCell]);
+  private zoomAtPoint(zoomIn: boolean, offsetX: number, offsetY: number): void {
+    const g = this.graph;
+    const view = g.getView();
+    const scale = view.getScale();
+    const factor = zoomIn ? 1.15 : 1 / 1.15;
+    const newScale = scale * factor;
+
+    const translate = view.getTranslate();
+    const dx = offsetX / scale - offsetX / newScale;
+    const dy = offsetY / scale - offsetY / newScale;
+
+    view.scaleAndTranslate(newScale, translate.x - dx, translate.y - dy);
+  }
+
+  // --- Port hover indicators (visual only, no click handling) ---
+
+  private updatePortHover(e: MouseEvent): void {
+    const container = this.containerRef.nativeElement;
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // If we already have a hovered cell, keep showing its ports until
+    // the mouse actually leaves its bounding box
+    if (this.hoveredCell) {
+      if (this.isInsideCellBounds(this.hoveredCell, mouseX, mouseY)) {
+        return;
+      }
+      // Mouse left the cell bounds — clear and check for new target
+      this.hoveredCell = null;
+      this.portOverlayRef.nativeElement.innerHTML = '';
+    }
+
+    const cell = this.graph.getCellAt(mouseX, mouseY);
+    const hoverTarget = cell?.isVertex() ? cell : null;
+
+    if (hoverTarget) {
+      this.hoveredCell = hoverTarget;
+      this.renderPorts(hoverTarget);
     }
   }
 
-  private createEdgeBetween(source: Cell, target: Cell): void {
-    const g = this.graph;
-    g.batchUpdate(() => {
-      g.insertEdge(g.getDefaultParent(), null, '', source, target);
-    });
+  private isInsideCellBounds(cell: Cell, screenX: number, screenY: number): boolean {
+    const state = this.graph.getView().getState(cell);
+    if (!state) return false;
+
+    const padding = 8;
+    return screenX >= state.x - padding && screenX <= state.x + state.width + padding &&
+           screenY >= state.y - padding && screenY <= state.y + state.height + padding;
   }
+
+  private renderPorts(cell: Cell | null): void {
+    const svg = this.portOverlayRef.nativeElement;
+    svg.innerHTML = '';
+    if (!cell) return;
+
+    const state = this.graph.getView().getState(cell);
+    if (!state) return;
+
+    const constraints = [
+      { px: 0.5, py: 0 },
+      { px: 1, py: 0.5 },
+      { px: 0.5, py: 1 },
+      { px: 0, py: 0.5 },
+    ];
+
+    for (const c of constraints) {
+      const x = state.x + state.width * c.px;
+      const y = state.y + state.height * c.py;
+
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', String(x));
+      circle.setAttribute('cy', String(y));
+      circle.setAttribute('r', '5');
+      circle.setAttribute('fill', '#555');
+      circle.setAttribute('stroke', '#fff');
+      circle.setAttribute('stroke-width', '1.5');
+      circle.setAttribute('opacity', '0.8');
+      svg.appendChild(circle);
+    }
+  }
+
 
   ngOnDestroy(): void {
     this.documentListeners.forEach(fn => fn());

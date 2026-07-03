@@ -384,8 +384,6 @@ class GraphStateService {
     hasSelection = computed(() => this.selectionCount() > 0);
     /** Current interaction mode */
     canvasMode = signal('select');
-    /** When in connect mode, the source node ID awaiting a target click */
-    connectSource = signal(null);
     /** When true, all interaction is disabled */
     disabled = signal(false);
     nodeCounter = 0;
@@ -480,6 +478,7 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
 
 class CanvasComponent {
     containerRef;
+    portOverlayRef;
     minimapRef;
     graph;
     undoManager;
@@ -487,14 +486,16 @@ class CanvasComponent {
     contextMenu = null;
     clipboardCells = [];
     documentListeners = [];
-    // Pan mode state
+    // Port hover indicator
+    hoveredCell = null;
+    // Pan state (mode pan, spacebar pan, or middle-click pan)
     isPanning = false;
     panStartX = 0;
     panStartY = 0;
     panStartTranslateX = 0;
     panStartTranslateY = 0;
-    // Connect mode state
-    connectSourceCell = null;
+    isSpaceHeld = false;
+    isMiddleMousePan = false;
     state = inject(GraphStateService);
     layoutService = inject(LayoutService);
     zone = inject(NgZone);
@@ -577,6 +578,20 @@ class CanvasComponent {
         // Delete/Backspace to remove
         keyHandler.bindKey(46, () => g.isEnabled() && g.removeCells());
         keyHandler.bindKey(8, () => g.isEnabled() && g.removeCells());
+        // Fallback: catch Backspace/Delete at container level in case KeyHandler misses it
+        container.addEventListener('keydown', (e) => {
+            if ((e.key === 'Backspace' || e.key === 'Delete') && g.isEnabled() && !g.isEditing()) {
+                const selected = g.getSelectionCells();
+                if (selected.length > 0) {
+                    e.preventDefault();
+                    g.removeCells();
+                }
+            }
+        });
+        // Ensure container can receive keyboard focus
+        if (!container.getAttribute('tabindex')) {
+            container.setAttribute('tabindex', '0');
+        }
         // Ctrl+Z undo, Ctrl+Y redo
         keyHandler.bindControlKey(90, () => this.undo()); // Ctrl+Z
         keyHandler.bindControlKey(89, () => this.redo()); // Ctrl+Y
@@ -589,10 +604,9 @@ class CanvasComponent {
         // Ctrl/Cmd+C copy, Ctrl/Cmd+V paste
         keyHandler.bindControlKey(67, () => this.copyCells()); // C
         keyHandler.bindControlKey(86, () => this.zone.run(() => this.pasteCells())); // V
-        // Mode shortcuts: V=select, H=pan, E=connect
+        // Mode shortcuts: V=select, H=pan
         keyHandler.bindKey(86, () => this.zone.run(() => this.state.canvasMode.set('select'))); // V
         keyHandler.bindKey(72, () => this.zone.run(() => this.state.canvasMode.set('pan'))); // H
-        keyHandler.bindKey(69, () => this.zone.run(() => this.state.canvasMode.set('connect'))); // E
         // Override isControlDown to also recognize Cmd (metaKey) on Mac
         keyHandler.isControlDown = (evt) => evt.ctrlKey || evt.metaKey;
         // Setup undo manager
@@ -602,6 +616,11 @@ class CanvasComponent {
         };
         g.getDataModel().addListener(InternalEvent.UNDO, listener);
         g.getView().addListener(InternalEvent.UNDO, listener);
+        // Clear port indicators when cells are being moved
+        g.addListener(InternalEvent.MOVE_CELLS, () => {
+            this.hoveredCell = null;
+            this.portOverlayRef.nativeElement.innerHTML = '';
+        });
         // Track selection changes for contextual toolbar
         g.getSelectionModel().addListener(InternalEvent.CHANGE, () => {
             this.zone.run(() => this.updateSelectionState());
@@ -653,6 +672,37 @@ class CanvasComponent {
             }
             return [];
         };
+        // Configure the connection handler:
+        // - Only trigger connections from the border region (not center/text area)
+        // - Show crosshair cursor when connection is possible
+        const connectionHandler = g.getPlugin('ConnectionHandler');
+        if (connectionHandler) {
+            connectionHandler.connectImage = null;
+            connectionHandler.livePreview = true;
+            connectionHandler.cursor = 'crosshair';
+            connectionHandler.outlineConnect = true;
+            // Override: only start a connection when the mouse is near the cell border
+            const origIsStartEvent = connectionHandler.isStartEvent.bind(connectionHandler);
+            connectionHandler.isStartEvent = (me) => {
+                if (!origIsStartEvent(me))
+                    return false;
+                // If we have a constraint point, we're on the border — allow it
+                if (connectionHandler.constraintHandler?.currentConstraint)
+                    return true;
+                // Otherwise check if mouse is near the edge of the cell
+                const state = connectionHandler.previous;
+                if (!state)
+                    return false;
+                const x = me.getGraphX();
+                const y = me.getGraphY();
+                const border = 12 / g.getView().getScale();
+                const nearLeft = x - state.x < border;
+                const nearRight = state.x + state.width - x < border;
+                const nearTop = y - state.y < border;
+                const nearBottom = state.y + state.height - y < border;
+                return nearLeft || nearRight || nearTop || nearBottom;
+            };
+        }
         // Set default edge style
         const defaultEdgeStyle = g.getStylesheet().getDefaultEdgeStyle();
         defaultEdgeStyle.endArrow = 'classic';
@@ -668,6 +718,22 @@ class CanvasComponent {
         }
         // Initialize minimap
         new Outline(g, this.minimapRef.nativeElement);
+        // Accept shape drops from the palette
+        container.addEventListener('dragover', (e) => {
+            if (e.dataTransfer?.types.includes('application/shape')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+            }
+        });
+        container.addEventListener('drop', (e) => {
+            const shape = e.dataTransfer?.getData('application/shape');
+            if (!shape)
+                return;
+            e.preventDefault();
+            const pt = g.getPointForEvent(e);
+            const size = getDefaultSize(shape);
+            this.zone.run(() => this.addNode(shape, pt.x - size.width / 2, pt.y - size.height / 2));
+        });
         // Setup pan and connect mode mouse handlers
         this.setupModeHandlers(container);
     }
@@ -958,65 +1024,38 @@ class CanvasComponent {
                 g.setCellsSelectable(false);
                 g.setCellsMovable(false);
                 container.style.cursor = 'grab';
-                this.clearConnectHighlight();
-                break;
-            case 'connect':
-                g.setConnectable(false);
-                g.setCellsSelectable(true);
-                g.setCellsMovable(false);
-                container.style.cursor = 'crosshair';
                 break;
             default: // 'select'
                 g.setConnectable(true);
                 g.setCellsSelectable(true);
                 g.setCellsMovable(true);
                 container.style.cursor = 'default';
-                this.clearConnectHighlight();
                 break;
         }
     }
     setupModeHandlers(container) {
-        // Use capture phase so pan/connect intercept before maxGraph's handlers
         const onMouseDown = (e) => {
+            // Middle-click pan (works in any mode)
+            if (e.button === 1) {
+                this.startPan(e, container);
+                this.isMiddleMousePan = true;
+                e.preventDefault();
+                return;
+            }
             if (e.button !== 0)
                 return;
-            const mode = this.state.canvasMode();
-            if (mode === 'pan') {
-                this.isPanning = true;
-                this.panStartX = e.clientX;
-                this.panStartY = e.clientY;
-                const translate = this.graph.getView().getTranslate();
-                this.panStartTranslateX = translate.x;
-                this.panStartTranslateY = translate.y;
-                container.style.cursor = 'grabbing';
+            // Spacebar temporary pan (works in any mode)
+            if (this.isSpaceHeld) {
+                this.startPan(e, container);
                 e.stopPropagation();
                 e.preventDefault();
+                return;
             }
-            else if (mode === 'connect') {
-                const pt = this.graph.getPointForEvent(e);
-                const cell = this.graph.getCellAt(pt.x, pt.y);
-                if (cell && cell.isVertex()) {
-                    if (!this.connectSourceCell) {
-                        this.connectSourceCell = cell;
-                        this.state.connectSource.set(cell.getId());
-                        this.highlightConnectSource(cell);
-                    }
-                    else {
-                        if (cell !== this.connectSourceCell) {
-                            this.createEdgeBetween(this.connectSourceCell, cell);
-                        }
-                        this.clearConnectHighlight();
-                        this.connectSourceCell = null;
-                        this.state.connectSource.set(null);
-                    }
-                    e.stopPropagation();
-                    e.preventDefault();
-                }
-                else if (!cell) {
-                    this.clearConnectHighlight();
-                    this.connectSourceCell = null;
-                    this.state.connectSource.set(null);
-                }
+            const mode = this.state.canvasMode();
+            if (mode === 'pan') {
+                this.startPan(e, container);
+                e.stopPropagation();
+                e.preventDefault();
             }
         };
         const onMouseMove = (e) => {
@@ -1026,45 +1065,152 @@ class CanvasComponent {
                 const scale = this.graph.getView().getScale();
                 this.graph.getView().setTranslate(this.panStartTranslateX + dx / scale, this.panStartTranslateY + dy / scale);
                 e.preventDefault();
+                return;
+            }
+            // Show port dots on hover
+            if (this.state.canvasMode() === 'select' && !this.graph.isEditing()) {
+                this.updatePortHover(e);
             }
         };
-        const onMouseUp = () => {
+        const onMouseUp = (e) => {
             if (this.isPanning) {
                 this.isPanning = false;
-                if (this.state.canvasMode() === 'pan') {
+                this.isMiddleMousePan = false;
+                const currentMode = this.state.canvasMode();
+                if (this.isSpaceHeld) {
                     container.style.cursor = 'grab';
+                }
+                else if (currentMode === 'pan') {
+                    container.style.cursor = 'grab';
+                }
+                else {
+                    container.style.cursor = 'default';
+                }
+                return;
+            }
+        };
+        // Scroll zoom (Ctrl/Cmd + wheel)
+        const onWheel = (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                const rect = container.getBoundingClientRect();
+                const offsetX = e.clientX - rect.left;
+                const offsetY = e.clientY - rect.top;
+                this.zoomAtPoint(e.deltaY < 0, offsetX, offsetY);
+            }
+        };
+        // Spacebar pan
+        const onKeyDown = (e) => {
+            if (e.code === 'Space' && !this.isSpaceHeld && !this.graph.isEditing()) {
+                this.isSpaceHeld = true;
+                container.style.cursor = 'grab';
+                e.preventDefault();
+            }
+        };
+        const onKeyUp = (e) => {
+            if (e.code === 'Space') {
+                this.isSpaceHeld = false;
+                if (!this.isPanning) {
+                    const mode = this.state.canvasMode();
+                    container.style.cursor = mode === 'pan' ? 'grab' : 'default';
                 }
             }
         };
         container.addEventListener('mousedown', onMouseDown, true);
+        container.addEventListener('wheel', onWheel, { passive: false });
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
-        this.documentListeners.push(() => document.removeEventListener('mousemove', onMouseMove), () => document.removeEventListener('mouseup', onMouseUp));
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
+        this.documentListeners.push(() => document.removeEventListener('mousemove', onMouseMove), () => document.removeEventListener('mouseup', onMouseUp), () => document.removeEventListener('keydown', onKeyDown), () => document.removeEventListener('keyup', onKeyUp));
     }
-    highlightConnectSource(cell) {
+    startPan(e, container) {
+        this.isPanning = true;
+        this.panStartX = e.clientX;
+        this.panStartY = e.clientY;
+        const translate = this.graph.getView().getTranslate();
+        this.panStartTranslateX = translate.x;
+        this.panStartTranslateY = translate.y;
+        container.style.cursor = 'grabbing';
+    }
+    zoomAtPoint(zoomIn, offsetX, offsetY) {
         const g = this.graph;
-        const currentStyle = cell.getStyle();
-        g.setCellStyle({ ...currentStyle, strokeColor: '#4a90d9', strokeWidth: 3 }, [cell]);
+        const view = g.getView();
+        const scale = view.getScale();
+        const factor = zoomIn ? 1.15 : 1 / 1.15;
+        const newScale = scale * factor;
+        const translate = view.getTranslate();
+        const dx = offsetX / scale - offsetX / newScale;
+        const dy = offsetY / scale - offsetY / newScale;
+        view.scaleAndTranslate(newScale, translate.x - dx, translate.y - dy);
     }
-    clearConnectHighlight() {
-        if (this.connectSourceCell) {
-            const style = getVertexStyle(styleToShape(this.connectSourceCell.getStyle()));
-            this.graph.setCellStyle(style, [this.connectSourceCell]);
+    // --- Port hover indicators (visual only, no click handling) ---
+    updatePortHover(e) {
+        const container = this.containerRef.nativeElement;
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        // If we already have a hovered cell, keep showing its ports until
+        // the mouse actually leaves its bounding box
+        if (this.hoveredCell) {
+            if (this.isInsideCellBounds(this.hoveredCell, mouseX, mouseY)) {
+                return;
+            }
+            // Mouse left the cell bounds — clear and check for new target
+            this.hoveredCell = null;
+            this.portOverlayRef.nativeElement.innerHTML = '';
+        }
+        const cell = this.graph.getCellAt(mouseX, mouseY);
+        const hoverTarget = cell?.isVertex() ? cell : null;
+        if (hoverTarget) {
+            this.hoveredCell = hoverTarget;
+            this.renderPorts(hoverTarget);
         }
     }
-    createEdgeBetween(source, target) {
-        const g = this.graph;
-        g.batchUpdate(() => {
-            g.insertEdge(g.getDefaultParent(), null, '', source, target);
-        });
+    isInsideCellBounds(cell, screenX, screenY) {
+        const state = this.graph.getView().getState(cell);
+        if (!state)
+            return false;
+        const padding = 8;
+        return screenX >= state.x - padding && screenX <= state.x + state.width + padding &&
+            screenY >= state.y - padding && screenY <= state.y + state.height + padding;
+    }
+    renderPorts(cell) {
+        const svg = this.portOverlayRef.nativeElement;
+        svg.innerHTML = '';
+        if (!cell)
+            return;
+        const state = this.graph.getView().getState(cell);
+        if (!state)
+            return;
+        const constraints = [
+            { px: 0.5, py: 0 },
+            { px: 1, py: 0.5 },
+            { px: 0.5, py: 1 },
+            { px: 0, py: 0.5 },
+        ];
+        for (const c of constraints) {
+            const x = state.x + state.width * c.px;
+            const y = state.y + state.height * c.py;
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', String(x));
+            circle.setAttribute('cy', String(y));
+            circle.setAttribute('r', '5');
+            circle.setAttribute('fill', '#555');
+            circle.setAttribute('stroke', '#fff');
+            circle.setAttribute('stroke-width', '1.5');
+            circle.setAttribute('opacity', '0.8');
+            svg.appendChild(circle);
+        }
     }
     ngOnDestroy() {
         this.documentListeners.forEach(fn => fn());
         this.graph?.destroy();
     }
     static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: CanvasComponent, deps: [], target: i0.ɵɵFactoryTarget.Component });
-    static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "19.2.20", type: CanvasComponent, isStandalone: true, selector: "lib-canvas", viewQueries: [{ propertyName: "containerRef", first: true, predicate: ["graphContainer"], descendants: true, static: true }, { propertyName: "minimapRef", first: true, predicate: ["minimapContainer"], descendants: true, static: true }], ngImport: i0, template: `
+    static ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "19.2.20", type: CanvasComponent, isStandalone: true, selector: "lib-canvas", viewQueries: [{ propertyName: "containerRef", first: true, predicate: ["graphContainer"], descendants: true, static: true }, { propertyName: "portOverlayRef", first: true, predicate: ["portOverlay"], descendants: true, static: true }, { propertyName: "minimapRef", first: true, predicate: ["minimapContainer"], descendants: true, static: true }], ngImport: i0, template: `
     <div #graphContainer class="graph-container" (contextmenu)="onContextMenu($event)"></div>
+    <svg #portOverlay class="port-overlay"></svg>
     <div #minimapContainer class="minimap"></div>
     @if (contextMenu) {
       <div class="context-menu" [style.left.px]="contextMenu.x" [style.top.px]="contextMenu.y">
@@ -1091,12 +1237,13 @@ class CanvasComponent {
         }
       </div>
     }
-  `, isInline: true, styles: [":host{display:block;width:100%;height:100%}:host{position:relative}.graph-container{width:100%;height:100%;overflow:auto;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] });
+  `, isInline: true, styles: [":host{display:block;width:100%;height:100%;position:relative}.graph-container{width:100%;height:100%;overflow:auto;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px}.port-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] });
 }
 i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: CanvasComponent, decorators: [{
             type: Component,
             args: [{ selector: 'lib-canvas', standalone: true, template: `
     <div #graphContainer class="graph-container" (contextmenu)="onContextMenu($event)"></div>
+    <svg #portOverlay class="port-overlay"></svg>
     <div #minimapContainer class="minimap"></div>
     @if (contextMenu) {
       <div class="context-menu" [style.left.px]="contextMenu.x" [style.top.px]="contextMenu.y">
@@ -1123,10 +1270,13 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
         }
       </div>
     }
-  `, styles: [":host{display:block;width:100%;height:100%}:host{position:relative}.graph-container{width:100%;height:100%;overflow:auto;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] }]
+  `, styles: [":host{display:block;width:100%;height:100%;position:relative}.graph-container{width:100%;height:100%;overflow:auto;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px}.port-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] }]
         }], propDecorators: { containerRef: [{
                 type: ViewChild,
                 args: ['graphContainer', { static: true }]
+            }], portOverlayRef: [{
+                type: ViewChild,
+                args: ['portOverlay', { static: true }]
             }], minimapRef: [{
                 type: ViewChild,
                 args: ['minimapContainer', { static: true }]
@@ -1134,6 +1284,12 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
 
 class ShapePaletteComponent {
     shapeSelected = output();
+    onDragStart(event, shape) {
+        event.dataTransfer?.setData('application/shape', shape);
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'copy';
+        }
+    }
     shapes = [
         { shape: 'rectangle', label: 'Process' },
         { shape: 'rounded', label: 'Start/End' },
@@ -1152,6 +1308,8 @@ class ShapePaletteComponent {
         <button
           class="palette-item"
           [title]="opt.label"
+          draggable="true"
+          (dragstart)="onDragStart($event, opt.shape)"
           (click)="shapeSelected.emit(opt.shape)"
         >
           <svg viewBox="0 0 40 30" class="shape-icon">
@@ -1198,6 +1356,8 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
         <button
           class="palette-item"
           [title]="opt.label"
+          draggable="true"
+          (dragstart)="onDragStart($event, opt.shape)"
           (click)="shapeSelected.emit(opt.shape)"
         >
           <svg viewBox="0 0 40 30" class="shape-icon">
@@ -1415,7 +1575,6 @@ class ToolbarComponent {
     edgeTypeChanged = output();
     setMode(mode) {
         this.state.canvasMode.set(mode);
-        this.state.connectSource.set(null);
     }
     onDirectionChange(event) {
         const dir = event.target.value;
@@ -1448,21 +1607,15 @@ class ToolbarComponent {
         <button
           class="toolbar-btn mode-btn"
           [class.active]="state.canvasMode() === 'select'"
-          title="Select mode (V) — click to select, drag to move"
+          title="Select mode (V) — click to select, drag to move. Drag from node edges to connect."
           (click)="setMode('select')"
         >⊹ Select <kbd>V</kbd></button>
         <button
           class="toolbar-btn mode-btn"
           [class.active]="state.canvasMode() === 'pan'"
-          title="Pan mode (H) — click and drag to move canvas"
+          title="Pan mode (H) — or hold Space to pan temporarily"
           (click)="setMode('pan')"
         >✥ Pan <kbd>H</kbd></button>
-        <button
-          class="toolbar-btn mode-btn"
-          [class.active]="state.canvasMode() === 'connect'"
-          title="Connect mode (E) — click source node, then target node"
-          (click)="setMode('connect')"
-        >⤳ Connect <kbd>E</kbd></button>
       </div>
 
       <div class="toolbar-divider"></div>
@@ -1533,21 +1686,15 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
         <button
           class="toolbar-btn mode-btn"
           [class.active]="state.canvasMode() === 'select'"
-          title="Select mode (V) — click to select, drag to move"
+          title="Select mode (V) — click to select, drag to move. Drag from node edges to connect."
           (click)="setMode('select')"
         >⊹ Select <kbd>V</kbd></button>
         <button
           class="toolbar-btn mode-btn"
           [class.active]="state.canvasMode() === 'pan'"
-          title="Pan mode (H) — click and drag to move canvas"
+          title="Pan mode (H) — or hold Space to pan temporarily"
           (click)="setMode('pan')"
         >✥ Pan <kbd>H</kbd></button>
-        <button
-          class="toolbar-btn mode-btn"
-          [class.active]="state.canvasMode() === 'connect'"
-          title="Connect mode (E) — click source node, then target node"
-          (click)="setMode('connect')"
-        >⤳ Connect <kbd>E</kbd></button>
       </div>
 
       <div class="toolbar-divider"></div>

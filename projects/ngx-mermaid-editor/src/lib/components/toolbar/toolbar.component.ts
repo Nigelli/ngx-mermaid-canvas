@@ -27,21 +27,15 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
         <button
           class="toolbar-btn mode-btn"
           [class.active]="state.canvasMode() === 'select'"
-          title="Select mode (V) — click to select, drag to move"
+          title="Select mode (V) — click to select, drag to move. Drag from node edges to connect."
           (click)="setMode('select')"
         >⊹ Select <kbd>V</kbd></button>
         <button
           class="toolbar-btn mode-btn"
           [class.active]="state.canvasMode() === 'pan'"
-          title="Pan mode (H) — click and drag to move canvas"
+          title="Pan mode (H) — or hold Space to pan temporarily"
           (click)="setMode('pan')"
         >✥ Pan <kbd>H</kbd></button>
-        <button
-          class="toolbar-btn mode-btn"
-          [class.active]="state.canvasMode() === 'connect'"
-          title="Connect mode (E) — click source node, then target node"
-          (click)="setMode('connect')"
-        >⤳ Connect <kbd>E</kbd></button>
       </div>
 
       <div class="toolbar-divider"></div>
@@ -173,7 +167,6 @@ export class ToolbarComponent {
 
   setMode(mode: CanvasMode): void {
     this.state.canvasMode.set(mode);
-    this.state.connectSource.set(null);
   }
 
   onDirectionChange(event: Event): void {
