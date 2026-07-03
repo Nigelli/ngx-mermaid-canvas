@@ -4,7 +4,7 @@ import {
 } from '@angular/core';
 import {
   Graph, InternalEvent, UndoManager, RubberBandHandler, KeyHandler, Cell, CellStyle,
-  ConnectionConstraint, Outline, type EventObject, Point,
+  ConnectionConstraint, Outline, type EventObject, Point, HexagonShape, ShapeRegistry,
 } from '@maxgraph/core';
 import { GraphStateService } from '../../services/graph-state.service';
 import { LayoutService } from '../../services/layout.service';
@@ -230,6 +230,21 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       () => document.removeEventListener('mousedown', dismissIfOutsideMenu, true),
     );
 
+    // Register custom trapezoid shape
+    if (!ShapeRegistry.get('trapezoid')) {
+      class TrapezoidShape extends HexagonShape {
+        override redrawPath(c: any, x: number, y: number, w: number, h: number): void {
+          this.addPoints(c, [
+            new Point(0.15 * w, 0),
+            new Point(0.85 * w, 0),
+            new Point(w, h),
+            new Point(0, h),
+          ], this.isRounded, this.getBaseArcSize(), true);
+        }
+      }
+      ShapeRegistry.add('trapezoid', TrapezoidShape);
+    }
+
     this.graph = new Graph(container);
     const g = this.graph;
 
@@ -255,20 +270,20 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     keyHandler.bindKey(46, () => g.isEnabled() && g.removeCells());
     keyHandler.bindKey(8, () => g.isEnabled() && g.removeCells());
 
-    // Fallback: catch Backspace/Delete at container level in case KeyHandler misses it
-    container.addEventListener('keydown', (e) => {
+    // Global fallback: catch Backspace/Delete even when container isn't focused
+    const onDeleteKey = (e: KeyboardEvent) => {
       if ((e.key === 'Backspace' || e.key === 'Delete') && g.isEnabled() && !g.isEditing()) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
         const selected = g.getSelectionCells();
         if (selected.length > 0) {
           e.preventDefault();
           g.removeCells();
         }
       }
-    });
-    // Ensure container can receive keyboard focus
-    if (!container.getAttribute('tabindex')) {
-      container.setAttribute('tabindex', '0');
-    }
+    };
+    document.addEventListener('keydown', onDeleteKey);
+    this.documentListeners.push(() => document.removeEventListener('keydown', onDeleteKey));
 
     // Ctrl+Z undo, Ctrl+Y redo
     keyHandler.bindControlKey(90, () => this.undo());  // Ctrl+Z
@@ -858,6 +873,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
+        e.preventDefault();
         this.isSpaceHeld = false;
         if (!this.isPanning) {
           const mode = this.state.canvasMode();

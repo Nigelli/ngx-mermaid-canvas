@@ -1,6 +1,6 @@
 import * as i0 from '@angular/core';
 import { Injectable, signal, computed, inject, NgZone, Injector, ChangeDetectorRef, runInInjectionContext, effect, ViewChild, Component, output, ChangeDetectionStrategy, input, ElementRef } from '@angular/core';
-import { Graph, RubberBandHandler, KeyHandler, UndoManager, InternalEvent, ConnectionConstraint, Point, Outline } from '@maxgraph/core';
+import { ShapeRegistry, HexagonShape, Point, Graph, RubberBandHandler, KeyHandler, UndoManager, InternalEvent, ConnectionConstraint, Outline } from '@maxgraph/core';
 import dagre from '@dagrejs/dagre';
 import { DomSanitizer } from '@angular/platform-browser';
 
@@ -40,8 +40,8 @@ const SHAPE_TO_STYLE = {
     subroutine: { shape: 'rectangle', strokeWidth: 2 },
     asymmetric: { shape: 'rectangle' },
     hexagon: { shape: 'hexagon' },
-    cylinder: { shape: 'cylinder3' },
-    trapezoid: { shape: 'trapezoid', perimeter: 'trapezoidPerimeter' },
+    cylinder: { shape: 'cylinder' },
+    trapezoid: { shape: 'trapezoid' },
 };
 const BASE_STYLE = {
     fillColor: '#ffffff',
@@ -66,7 +66,7 @@ function styleToShape(style) {
         return 'parallelogram';
     if (style.shape === 'hexagon')
         return 'hexagon';
-    if (style.shape === 'cylinder3')
+    if (style.shape === 'cylinder')
         return 'cylinder';
     if (style.shape === 'trapezoid')
         return 'trapezoid';
@@ -559,6 +559,20 @@ class CanvasComponent {
         };
         document.addEventListener('mousedown', dismissIfOutsideMenu, true);
         this.documentListeners.push(() => document.removeEventListener('mousedown', dismissIfOutsideMenu, true));
+        // Register custom trapezoid shape
+        if (!ShapeRegistry.get('trapezoid')) {
+            class TrapezoidShape extends HexagonShape {
+                redrawPath(c, x, y, w, h) {
+                    this.addPoints(c, [
+                        new Point(0.15 * w, 0),
+                        new Point(0.85 * w, 0),
+                        new Point(w, h),
+                        new Point(0, h),
+                    ], this.isRounded, this.getBaseArcSize(), true);
+                }
+            }
+            ShapeRegistry.add('trapezoid', TrapezoidShape);
+        }
         this.graph = new Graph(container);
         const g = this.graph;
         // Enable features
@@ -578,20 +592,21 @@ class CanvasComponent {
         // Delete/Backspace to remove
         keyHandler.bindKey(46, () => g.isEnabled() && g.removeCells());
         keyHandler.bindKey(8, () => g.isEnabled() && g.removeCells());
-        // Fallback: catch Backspace/Delete at container level in case KeyHandler misses it
-        container.addEventListener('keydown', (e) => {
+        // Global fallback: catch Backspace/Delete even when container isn't focused
+        const onDeleteKey = (e) => {
             if ((e.key === 'Backspace' || e.key === 'Delete') && g.isEnabled() && !g.isEditing()) {
+                const tag = e.target?.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable)
+                    return;
                 const selected = g.getSelectionCells();
                 if (selected.length > 0) {
                     e.preventDefault();
                     g.removeCells();
                 }
             }
-        });
-        // Ensure container can receive keyboard focus
-        if (!container.getAttribute('tabindex')) {
-            container.setAttribute('tabindex', '0');
-        }
+        };
+        document.addEventListener('keydown', onDeleteKey);
+        this.documentListeners.push(() => document.removeEventListener('keydown', onDeleteKey));
         // Ctrl+Z undo, Ctrl+Y redo
         keyHandler.bindControlKey(90, () => this.undo()); // Ctrl+Z
         keyHandler.bindControlKey(89, () => this.redo()); // Ctrl+Y
@@ -1109,6 +1124,7 @@ class CanvasComponent {
         };
         const onKeyUp = (e) => {
             if (e.code === 'Space') {
+                e.preventDefault();
                 this.isSpaceHeld = false;
                 if (!this.isPanning) {
                     const mode = this.state.canvasMode();
