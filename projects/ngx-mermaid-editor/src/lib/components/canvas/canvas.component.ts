@@ -72,16 +72,17 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
     }
   `,
   styles: [`
-    :host { display: block; width: 100%; height: 100%; position: relative; }
+    :host { display: block; width: 100%; height: 100%; position: relative; user-select: none; }
     .graph-container {
       width: 100%;
       height: 100%;
-      overflow: auto;
+      overflow: hidden;
       cursor: default;
       position: relative;
       background-color: #f8f9fa;
       background-image: radial-gradient(circle, #d0d0d0 1px, transparent 1px);
       background-size: 20px 20px;
+      user-select: none;
     }
     .port-overlay {
       position: absolute;
@@ -222,6 +223,10 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   // Port hover indicator
   private hoveredCell: Cell | null = null;
 
+  // Rubberband (drag-to-select) handler reference
+  private rubberband!: RubberBandHandler;
+  private wheelTimeout: any = null;
+
   // Pan state (mode pan, spacebar pan, or middle-click pan)
   private isPanning = false;
   private panStartX = 0;
@@ -347,7 +352,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     }
 
     // Enable rubberband selection
-    new RubberBandHandler(g);
+    this.rubberband = new RubberBandHandler(g);
 
     // Keyboard shortcuts
     const keyHandler = new KeyHandler(g);
@@ -898,9 +903,11 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     const onMouseDown = (e: MouseEvent) => {
       // Middle-click pan (works in any mode)
       if (e.button === 1) {
+        this.rubberband.setEnabled(false);
         this.startPan(e, container);
         this.isMiddleMousePan = true;
         e.preventDefault();
+        e.stopPropagation();
         return;
       }
 
@@ -944,7 +951,10 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     const onMouseUp = (_e: MouseEvent) => {
       if (this.isPanning) {
         this.isPanning = false;
-        this.isMiddleMousePan = false;
+        if (this.isMiddleMousePan) {
+          this.isMiddleMousePan = false;
+          this.rubberband.setEnabled(true);
+        }
         const currentMode = this.state.canvasMode();
         if (this.isSpaceHeld) {
           container.style.cursor = 'grab';
@@ -955,17 +965,30 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
         }
         return;
       }
-
     };
 
-    // Scroll zoom (Ctrl/Cmd + wheel)
+    // Wheel: Ctrl/Cmd + wheel = zoom, plain wheel = pan
+    // Disable rubberband during wheel to prevent selection highlight
     const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      this.rubberband.setEnabled(false);
+      clearTimeout(this.wheelTimeout);
+      this.wheelTimeout = setTimeout(() => this.rubberband.setEnabled(true), 150);
+
       if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
         const rect = container.getBoundingClientRect();
         const offsetX = e.clientX - rect.left;
         const offsetY = e.clientY - rect.top;
         this.zoomAtPoint(e.deltaY < 0, offsetX, offsetY);
+      } else {
+        const view = this.graph.getView();
+        const scale = view.getScale();
+        const translate = view.getTranslate();
+        view.setTranslate(
+          translate.x - e.deltaX / scale,
+          translate.y - e.deltaY / scale,
+        );
       }
     };
 

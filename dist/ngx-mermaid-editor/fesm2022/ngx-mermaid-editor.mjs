@@ -499,6 +499,9 @@ class CanvasComponent {
     documentListeners = [];
     // Port hover indicator
     hoveredCell = null;
+    // Rubberband (drag-to-select) handler reference
+    rubberband;
+    wheelTimeout = null;
     // Pan state (mode pan, spacebar pan, or middle-click pan)
     isPanning = false;
     panStartX = 0;
@@ -607,7 +610,7 @@ class CanvasComponent {
             selectionHandler.guidesEnabled = true;
         }
         // Enable rubberband selection
-        new RubberBandHandler(g);
+        this.rubberband = new RubberBandHandler(g);
         // Keyboard shortcuts
         const keyHandler = new KeyHandler(g);
         // Delete/Backspace to remove
@@ -1093,9 +1096,11 @@ class CanvasComponent {
         const onMouseDown = (e) => {
             // Middle-click pan (works in any mode)
             if (e.button === 1) {
+                this.rubberband.setEnabled(false);
                 this.startPan(e, container);
                 this.isMiddleMousePan = true;
                 e.preventDefault();
+                e.stopPropagation();
                 return;
             }
             if (e.button !== 0)
@@ -1131,7 +1136,10 @@ class CanvasComponent {
         const onMouseUp = (_e) => {
             if (this.isPanning) {
                 this.isPanning = false;
-                this.isMiddleMousePan = false;
+                if (this.isMiddleMousePan) {
+                    this.isMiddleMousePan = false;
+                    this.rubberband.setEnabled(true);
+                }
                 const currentMode = this.state.canvasMode();
                 if (this.isSpaceHeld) {
                     container.style.cursor = 'grab';
@@ -1145,14 +1153,24 @@ class CanvasComponent {
                 return;
             }
         };
-        // Scroll zoom (Ctrl/Cmd + wheel)
+        // Wheel: Ctrl/Cmd + wheel = zoom, plain wheel = pan
+        // Disable rubberband during wheel to prevent selection highlight
         const onWheel = (e) => {
+            e.preventDefault();
+            this.rubberband.setEnabled(false);
+            clearTimeout(this.wheelTimeout);
+            this.wheelTimeout = setTimeout(() => this.rubberband.setEnabled(true), 150);
             if (e.ctrlKey || e.metaKey) {
-                e.preventDefault();
                 const rect = container.getBoundingClientRect();
                 const offsetX = e.clientX - rect.left;
                 const offsetY = e.clientY - rect.top;
                 this.zoomAtPoint(e.deltaY < 0, offsetX, offsetY);
+            }
+            else {
+                const view = this.graph.getView();
+                const scale = view.getScale();
+                const translate = view.getTranslate();
+                view.setTranslate(translate.x - e.deltaX / scale, translate.y - e.deltaY / scale);
             }
         };
         // Spacebar pan
@@ -1320,7 +1338,7 @@ class CanvasComponent {
         }
       </div>
     }
-  `, isInline: true, styles: [":host{display:block;width:100%;height:100%;position:relative}.graph-container{width:100%;height:100%;overflow:auto;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px}.port-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.radial-menu{position:absolute;z-index:1000;width:0;height:0}.radial-item{position:absolute;width:44px;height:44px;border-radius:8px;border:1px solid #d0d0d0;background:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;box-shadow:0 2px 6px #0000001f;transition:background .12s;color:#444;padding:2px}.radial-item:hover{background:#f0f4ff;border-color:#999}.radial-icon{width:20px;height:14px}.radial-label{font-size:7px;line-height:1;color:#666;white-space:nowrap}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] });
+  `, isInline: true, styles: [":host{display:block;width:100%;height:100%;position:relative;-webkit-user-select:none;user-select:none}.graph-container{width:100%;height:100%;overflow:hidden;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px;-webkit-user-select:none;user-select:none}.port-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.radial-menu{position:absolute;z-index:1000;width:0;height:0}.radial-item{position:absolute;width:44px;height:44px;border-radius:8px;border:1px solid #d0d0d0;background:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;box-shadow:0 2px 6px #0000001f;transition:background .12s;color:#444;padding:2px}.radial-item:hover{background:#f0f4ff;border-color:#999}.radial-icon{width:20px;height:14px}.radial-label{font-size:7px;line-height:1;color:#666;white-space:nowrap}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] });
 }
 i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImport: i0, type: CanvasComponent, decorators: [{
             type: Component,
@@ -1379,7 +1397,7 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
         }
       </div>
     }
-  `, styles: [":host{display:block;width:100%;height:100%;position:relative}.graph-container{width:100%;height:100%;overflow:auto;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px}.port-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.radial-menu{position:absolute;z-index:1000;width:0;height:0}.radial-item{position:absolute;width:44px;height:44px;border-radius:8px;border:1px solid #d0d0d0;background:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;box-shadow:0 2px 6px #0000001f;transition:background .12s;color:#444;padding:2px}.radial-item:hover{background:#f0f4ff;border-color:#999}.radial-icon{width:20px;height:14px}.radial-label{font-size:7px;line-height:1;color:#666;white-space:nowrap}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] }]
+  `, styles: [":host{display:block;width:100%;height:100%;position:relative;-webkit-user-select:none;user-select:none}.graph-container{width:100%;height:100%;overflow:hidden;cursor:default;position:relative;background-color:#f8f9fa;background-image:radial-gradient(circle,#d0d0d0 1px,transparent 1px);background-size:20px 20px;-webkit-user-select:none;user-select:none}.port-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:visible}:host ::ng-deep .mxCellEditor{background:#fff!important;border:2px solid #4a90d9!important;border-radius:3px;padding:2px 4px!important;font-family:Inter,system-ui,sans-serif;font-size:13px;outline:none;box-shadow:0 2px 8px #00000026;overflow:visible!important}:host ::ng-deep .mxRubberband{position:absolute;background:#4a90d91f;border:1.5px solid rgba(74,144,217,.6);border-radius:2px;pointer-events:none}.minimap{position:absolute;bottom:8px;right:8px;width:150px;height:110px;border:1px solid #ccc;border-radius:4px;background:#fff;opacity:.85;overflow:hidden;z-index:10}.radial-menu{position:absolute;z-index:1000;width:0;height:0}.radial-item{position:absolute;width:44px;height:44px;border-radius:8px;border:1px solid #d0d0d0;background:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;box-shadow:0 2px 6px #0000001f;transition:background .12s;color:#444;padding:2px}.radial-item:hover{background:#f0f4ff;border-color:#999}.radial-icon{width:20px;height:14px}.radial-label{font-size:7px;line-height:1;color:#666;white-space:nowrap}.context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid #d0d0d0;border-radius:6px;box-shadow:0 4px 12px #00000026;padding:4px 0;min-width:160px}.ctx-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;border:none;background:none;cursor:pointer;color:#333}.ctx-item:hover{background:#f0f4ff}.ctx-item.danger{color:#c33}.ctx-item.danger:hover{background:#fff0f0}.ctx-divider{height:1px;background:#e8e8e8;margin:4px 0}\n"] }]
         }], propDecorators: { containerRef: [{
                 type: ViewChild,
                 args: ['graphContainer', { static: true }]

@@ -31,6 +31,8 @@ export declare class CanvasComponent implements AfterViewInit, OnDestroy {
     clipboardCells: Cell[];
     private documentListeners;
     private hoveredCell;
+    private rubberband;
+    private wheelTimeout;
     private isPanning;
     private panStartX;
     private panStartY;
