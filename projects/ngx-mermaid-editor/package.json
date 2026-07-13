@@ -24,8 +24,9 @@
     "maxgraph"
   ],
   "peerDependencies": {
-    "@angular/common": "^19.2.0",
-    "@angular/core": "^19.2.0",
+    "@angular/common": ">=17.3.0 <23.0.0",
+    "@angular/core": ">=17.3.0 <23.0.0",
+    "@angular/platform-browser": ">=17.3.0 <23.0.0",
     "@maxgraph/core": ">=0.12.0",
     "mermaid": ">=11.0.0"
   },

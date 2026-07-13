@@ -7,8 +7,10 @@
     "start": "ng serve",
     "build": "ng build",
     "build:lib": "ng build ngx-mermaid-editor",
+    "build:demo": "ng build example-basic",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "test:ci": "ng test ngx-mermaid-editor --no-watch --no-progress --browsers=ChromeHeadless",
     "release": "ng build ngx-mermaid-editor && cd dist/ngx-mermaid-editor && npm publish"
   },
   "private": true,
