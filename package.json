@@ -10,7 +10,6 @@
     "test": "ng test"
   },
   "private": true,
-  "files": ["dist"],
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
     "@maxgraph/core": "^0.22.0",
