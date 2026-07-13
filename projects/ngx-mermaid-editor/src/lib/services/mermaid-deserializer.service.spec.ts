@@ -83,12 +83,14 @@ describe('MermaidDeserializerService', () => {
       expect(m.nodes.get('A')!.label).toBe('A');
     });
 
-    // NOTE: possible bug — valid Mermaid allows declaring a node as a bare id on its
-    // own line (e.g. "A"), but parseNodeDef requires a shape bracket, so such lines
-    // are silently dropped and the node never enters the model.
-    it('currently ignores bare-id node declarations (documents current behavior)', () => {
+    it('creates a default rectangle node from a bare-id declaration', () => {
       const m = service.deserialize('flowchart TD\n    A')!;
-      expect(m.nodes.size).toBe(0);
+      expect(m.nodes.get('A')).toEqual({ id: 'A', label: 'A', shape: 'rectangle' });
+    });
+
+    it('does not let a bare-id line downgrade an already-defined node', () => {
+      const m = service.deserialize('flowchart TD\n    A{"Decide"}\n    A')!;
+      expect(m.nodes.get('A')).toEqual({ id: 'A', label: 'Decide', shape: 'diamond' });
     });
 
     it('skips comment lines and unrecognized statements', () => {
@@ -157,16 +159,26 @@ describe('MermaidDeserializerService', () => {
       expect(m.nodes.get('B')).toEqual({ id: 'B', label: 'Decide', shape: 'diamond' });
     });
 
-    // NOTE: possible bug — a node whose LABEL contains an edge connector (e.g. "-->")
-    // is misparsed as an edge because parseChainEdge runs before parseNodeDef and does
-    // not respect quoted strings. `A["go --> stop"]` yields nodes A and "stop" plus a
-    // spurious edge, and the label text is lost.
-    it('currently misparses a node label containing "-->" as an edge (documents current behavior)', () => {
+    it('preserves a quoted node label containing an edge connector', () => {
       const m = service.deserialize('flowchart TD\n    A["go --> stop"]')!;
-      expect(m.nodes.get('A')!.label).toBe('A');       // label lost
-      expect(m.nodes.has('stop')).toBeTrue();          // spurious node
-      expect(m.edges.length).toBe(1);                  // spurious edge
-      expect(m.edges[0]).toEqual(jasmine.objectContaining({ sourceId: 'A', targetId: 'stop' }));
+      expect(m.nodes.size).toBe(1);
+      expect(m.nodes.get('A')!.label).toBe('go --> stop');
+      expect(m.edges.length).toBe(0);
+    });
+
+    it('still parses a real edge whose inline source label contains "-->"', () => {
+      const m = service.deserialize('flowchart TD\n    A["go --> stop"] --> B')!;
+      expect(m.nodes.get('A')!.label).toBe('go --> stop');
+      expect(m.edges.length).toBe(1);
+      expect(m.edges[0]).toEqual(
+        jasmine.objectContaining({ sourceId: 'A', targetId: 'B', type: 'arrow' }));
+    });
+
+    it('preserves a quoted edge label containing a pipe character', () => {
+      const m = service.deserialize('flowchart TD\n    A -->|"a|b"| B')!;
+      expect(m.edges.length).toBe(1);
+      expect(m.edges[0].label).toBe('a|b');
+      expect(m.edges[0].targetId).toBe('B');
     });
   });
 

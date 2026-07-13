@@ -161,17 +161,19 @@ describe('Mermaid round-trip (serialize <-> deserialize)', () => {
     expect(once.startsWith('flowchart TD\n')).toBeTrue();
   });
 
-  // NOTE: possible bug — edge labels containing a pipe character cannot round-trip:
-  // the serializer emits A -->|"a|b"| B but the deserializer's connector regex uses
-  // [^|]* for the label, so the label is truncated and the remainder corrupts the
-  // target segment. This test documents the lossy behavior.
-  it('currently corrupts edge labels containing "|" (documents current behavior)', () => {
-    const model = buildModel({
+  it('round-trips edge labels containing a pipe character', () => {
+    expectModelRoundTrip(buildModel({
       nodes: [{ id: 'A', label: 'a', shape: 'rectangle' },
               { id: 'B', label: 'b', shape: 'rectangle' }],
       edges: [{ id: '1', sourceId: 'A', targetId: 'B', type: 'arrow', label: 'a|b' }],
-    });
-    const back = deserializer.deserialize(serializer.serialize(model))!;
-    expect(back.edges[0].label).not.toBe('a|b');
+    }));
+  });
+
+  it('round-trips labels containing edge-connector text', () => {
+    expectModelRoundTrip(buildModel({
+      nodes: [{ id: 'A', label: 'go --> stop', shape: 'rectangle' },
+              { id: 'B', label: 'b ==> c', shape: 'rounded' }],
+      edges: [{ id: '1', sourceId: 'A', targetId: 'B', type: 'arrow', label: 'x --> y | z' }],
+    }));
   });
 });
