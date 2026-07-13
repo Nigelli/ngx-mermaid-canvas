@@ -1,0 +1,62 @@
+name: Release
+
+# Publishes the ngx-mermaid-canvas library to npm whenever a tag matching
+# `v*` (e.g. v0.1.0, v1.2.3) is pushed.
+on:
+  push:
+    tags:
+      - 'v*'
+
+# `id-token: write` is required for npm provenance (OIDC token exchange with
+# npm's Sigstore-backed attestation service). `contents: read` is the
+# minimal permission needed to check out the repo.
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build & publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+          # Required so `npm publish` targets the public npm registry and
+          # picks up NODE_AUTH_TOKEN below for auth.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build library (production)
+        run: npm run build:lib
+
+      - name: Publish to npm with provenance
+        run: npm publish --provenance
+        working-directory: dist/ngx-mermaid-editor
+        env:
+          # ---------------------------------------------------------------
+          # MAINTAINER ACTION REQUIRED:
+          # This workflow reads an `NPM_TOKEN` repository (or environment)
+          # secret that does NOT exist yet and must be created by a repo
+          # admin before this job can succeed:
+          #   1. Create an npm access token with "Automation" (or
+          #      "Granular Access Token" with publish rights to the
+          #      `ngx-mermaid-canvas` package) at https://www.npmjs.com/.
+          #   2. In GitHub: Settings -> Secrets and variables -> Actions ->
+          #      New repository secret, name it exactly `NPM_TOKEN`, and
+          #      paste the npm token as the value.
+          # No secret is invented or assumed here; the workflow will fail
+          # at the publish step with an auth error until this is done.
+          # ---------------------------------------------------------------
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

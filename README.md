@@ -22,7 +22,7 @@ A visual flowchart editor for Angular that outputs [Mermaid](https://mermaid.js.
 ## Installation
 
 ```bash
-npm install ngx-mermaid-editor
+npm install ngx-mermaid-canvas
 ```
 
 ### Peer dependencies
@@ -34,12 +34,12 @@ npm install @angular/common @angular/core @maxgraph/core mermaid
 ## Usage
 
 ```typescript
-import { MermaidEditorComponent } from 'ngx-mermaid-editor';
+import { MermaidEditorComponent } from 'ngx-mermaid-canvas';
 
 @Component({
   imports: [MermaidEditorComponent],
   template: `
-    <ngx-mermaid-editor
+    <ngx-mermaid-canvas
       [mermaidText]="code"
       (mermaidTextChange)="onCodeChange($event)"
     />
@@ -78,11 +78,11 @@ export class MyComponent {
 
 ```typescript
 import type {
-  FlowchartModel, FlowNode, FlowEdge,
+  FlowchartModel, FlowNode, FlowEdge, FlowSubgraph,
   FlowDirection, MermaidShape, MermaidEdgeType,
-} from 'ngx-mermaid-editor';
+} from 'ngx-mermaid-canvas';
 
-import { createEmptyModel, cloneModel } from 'ngx-mermaid-editor';
+import { createEmptyModel, cloneModel } from 'ngx-mermaid-canvas';
 ```
 
 ### Standalone services
@@ -93,7 +93,7 @@ The serializer and deserializer are also exported if you need Mermaid conversion
 import {
   MermaidSerializerService,
   MermaidDeserializerService,
-} from 'ngx-mermaid-editor';
+} from 'ngx-mermaid-canvas';
 ```
 
 ## License

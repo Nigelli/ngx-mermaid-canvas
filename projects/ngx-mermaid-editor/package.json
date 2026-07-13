@@ -1,16 +1,38 @@
 {
-  "name": "ngx-mermaid-editor",
-  "version": "0.0.1",
+  "name": "ngx-mermaid-canvas",
+  "version": "0.1.0",
+  "description": "A visual drag-and-drop flowchart editor for Angular that reads and writes Mermaid syntax.",
+  "author": "Nigel Anderson",
   "license": "MIT",
+  "homepage": "https://github.com/Nigelli/ngx-mermaid-canvas#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nigelli/ngx-mermaid-canvas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Nigelli/ngx-mermaid-canvas/issues"
+  },
+  "keywords": [
+    "angular",
+    "mermaid",
+    "flowchart",
+    "diagram",
+    "diagram-editor",
+    "graph-editor",
+    "visual-editor",
+    "drag-and-drop",
+    "maxgraph"
+  ],
   "peerDependencies": {
-    "@angular/common": "^19.2.0",
-    "@angular/core": "^19.2.0",
+    "@angular/common": ">=17.3.0 <23.0.0",
+    "@angular/core": ">=17.3.0 <23.0.0",
+    "@angular/platform-browser": ">=17.3.0 <23.0.0",
     "@maxgraph/core": ">=0.12.0",
     "mermaid": ">=11.0.0"
   },
   "dependencies": {
     "tslib": "^2.3.0",
-    "@dagrejs/dagre": "^1.1.4"
+    "@dagrejs/dagre": "^3.0.0"
   },
   "sideEffects": false
 }

@@ -72,6 +72,13 @@ export class MermaidDeserializerService {
         this.trackNodeInSubgraph(subgraphStack, nodeParsed.id);
         continue;
       }
+
+      const bareId = line.match(/^\w+$/);
+      if (bareId) {
+        this.ensureNode(model, bareId[0]);
+        this.trackNodeInSubgraph(subgraphStack, bareId[0]);
+        continue;
+      }
     }
 
     return model;
@@ -152,34 +159,46 @@ export class MermaidDeserializerService {
     targetId: string; targetLabel?: string; targetShape?: MermaidShape;
     label?: string; type: MermaidEdgeType;
   }> | null {
-    const edgeConnectors: Array<{ regex: RegExp; type: MermaidEdgeType }> = [
-      { regex: /-\.->(?:\|([^|]*)\|)?/, type: 'dotted-arrow' },
-      { regex: /==>(?:\|([^|]*)\|)?/,   type: 'thick-arrow' },
-      { regex: /-->(?:\|([^|]*)\|)?/,    type: 'arrow' },
-      { regex: /---(?:\|([^|]*)\|)?/,    type: 'open' },
+    const edgeConnectors: Array<{ token: string; regex: RegExp; type: MermaidEdgeType }> = [
+      { token: '-.->', regex: /-\.->(?:\|([^|]*)\|)?/, type: 'dotted-arrow' },
+      { token: '==>',  regex: /==>(?:\|([^|]*)\|)?/,   type: 'thick-arrow' },
+      { token: '-->',  regex: /-->(?:\|([^|]*)\|)?/,    type: 'arrow' },
+      { token: '---',  regex: /---(?:\|([^|]*)\|)?/,    type: 'open' },
     ];
 
+    // Connectors and label delimiters are searched on a copy of the line with
+    // quoted content blanked out, so "-->" or "|" inside a quoted label is
+    // never mistaken for edge syntax. Actual text is sliced from the original.
+    const masked = this.maskQuotedContent(text);
+
     const combinedPattern = /(?:-\.->(?:\|[^|]*\|)?|==>(?:\|[^|]*\|)?|-->(?:\|[^|]*\|)?|---(?:\|[^|]*\|)?)/;
-    if (!combinedPattern.test(text)) return null;
+    if (!combinedPattern.test(masked)) return null;
 
     const segments: string[] = [];
     const connectors: Array<{ type: MermaidEdgeType; label?: string }> = [];
 
     let remaining = text;
+    let remainingMasked = masked;
     while (remaining.length > 0) {
       let earliest: { index: number; matchLen: number; type: MermaidEdgeType; label?: string } | null = null;
 
-      for (const { regex, type } of edgeConnectors) {
-        const m = remaining.match(regex);
+      for (const { token, regex, type } of edgeConnectors) {
+        const m = remainingMasked.match(regex);
         if (m && m.index !== undefined) {
           if (!earliest || m.index < earliest.index) {
-            let edgeLabel = m[1]?.trim();
-            if (edgeLabel) {
-              if ((edgeLabel.startsWith('"') && edgeLabel.endsWith('"')) ||
-                  (edgeLabel.startsWith("'") && edgeLabel.endsWith("'"))) {
-                edgeLabel = edgeLabel.slice(1, -1);
+            let edgeLabel: string | undefined;
+            if (m[1] !== undefined) {
+              // Take the label from the unmasked text (between the two pipes).
+              edgeLabel = remaining
+                .slice(m.index + token.length + 1, m.index + m[0].length - 1)
+                .trim();
+              if (edgeLabel) {
+                if ((edgeLabel.startsWith('"') && edgeLabel.endsWith('"')) ||
+                    (edgeLabel.startsWith("'") && edgeLabel.endsWith("'"))) {
+                  edgeLabel = edgeLabel.slice(1, -1);
+                }
+                edgeLabel = edgeLabel.replace(/#quot;/g, '"');
               }
-              edgeLabel = edgeLabel.replace(/#quot;/g, '"');
             }
             earliest = { index: m.index, matchLen: m[0].length, type, label: edgeLabel || undefined };
           }
@@ -197,6 +216,7 @@ export class MermaidDeserializerService {
       }
       connectors.push({ type: earliest.type, label: earliest.label });
       remaining = remaining.slice(earliest.index + earliest.matchLen);
+      remainingMasked = remainingMasked.slice(earliest.index + earliest.matchLen);
     }
 
     if (segments.length < 2 || connectors.length < 1) return null;
@@ -221,6 +241,26 @@ export class MermaidDeserializerService {
     }
 
     return edges;
+  }
+
+  /**
+   * Returns a same-length copy of the line with the content of double-quoted
+   * spans replaced by '#', so structural scans (edge connectors, |label|
+   * delimiters) cannot match inside quoted labels. Single quotes are left
+   * alone: they double as apostrophes in unquoted labels.
+   */
+  private maskQuotedContent(text: string): string {
+    let out = '';
+    let inQuote = false;
+    for (const ch of text) {
+      if (ch === '"') {
+        inQuote = !inQuote;
+        out += ch;
+      } else {
+        out += inQuote ? '#' : ch;
+      }
+    }
+    return out;
   }
 
   private parseInlineNode(text: string): { id: string; label?: string; shape?: MermaidShape } | null {

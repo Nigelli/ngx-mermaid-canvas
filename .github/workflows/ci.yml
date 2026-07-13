@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# Cancel any in-progress run for the same branch/PR when a new commit is pushed.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Angular 19 supports Node 18.19+/20/22. We pin 20.x and 22.x
+        # (LTS + current) rather than 18.x since 18 is EOL/near-EOL.
+        node-version: [20.x, 22.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build library (ngx-mermaid-editor)
+        run: npm run build:lib
+
+      - name: Build demo app (example-basic)
+        run: npm run build:demo
+
+      - name: Run library unit tests (ChromeHeadless)
+        run: npm run test:ci
+        # GitHub-hosted ubuntu runners ship Google Chrome preinstalled, and
+        # karma-chrome-launcher's built-in ChromeHeadless launcher auto-detects
+        # it (no extra setup action needed). The runner executes as a
+        # non-root user, so the Chrome sandbox works out of the box and no
+        # `--no-sandbox` custom launcher is required. If tests ever start
+        # failing here with a sandbox-related crash, the fix would be to add a
+        # `customLaunchers.ChromeHeadlessCI` entry (with `--no-sandbox
+        # --disable-gpu`) to a karma.conf.js for the library and pass
+        # `--browsers=ChromeHeadlessCI` instead — intentionally not done here
+        # since no karma.conf.js currently exists in the project.
+
+  audit:
+    name: npm audit (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+        # Non-blocking by design: this is a workspace-root audit that also
+        # picks up devtools like Angular CLI/ng-packagr transitively, and
+        # upstream advisories in a large dependency tree (Angular, mermaid,
+        # monaco-editor, maxgraph) are common and frequently cannot be fixed
+        # immediately without an unrelated major bump. Failing the whole
+        # pipeline on every new advisory would make CI flaky/blocking for
+        # reasons unrelated to the change being reviewed. The step still runs
+        # on every push/PR and surfaces results in the log/annotations so
+        # advisories are visible without gating merges.
+        continue-on-error: true
