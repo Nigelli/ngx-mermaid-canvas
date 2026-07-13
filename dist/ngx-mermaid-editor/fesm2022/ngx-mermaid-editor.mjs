@@ -5,13 +5,14 @@ import dagre from '@dagrejs/dagre';
 import { DomSanitizer } from '@angular/platform-browser';
 
 function createEmptyModel(direction = 'TD') {
-    return { direction, nodes: new Map(), edges: [] };
+    return { direction, nodes: new Map(), edges: [], subgraphs: [] };
 }
 function cloneModel(model) {
     return {
         direction: model.direction,
         nodes: new Map(Array.from(model.nodes.entries()).map(([k, v]) => [k, { ...v }])),
         edges: model.edges.map(e => ({ ...e })),
+        subgraphs: model.subgraphs.map(s => ({ ...s, nodeIds: [...s.nodeIds] })),
     };
 }
 
@@ -129,15 +130,47 @@ function styleToEdgeType(style) {
 class MermaidSerializerService {
     serialize(model) {
         const lines = [`flowchart ${model.direction}`];
-        // Node definitions
-        for (const node of model.nodes.values()) {
-            lines.push(`    ${this.serializeNode(node)}`);
+        const nodesInSubgraphs = new Set();
+        for (const sg of model.subgraphs) {
+            for (const nid of sg.nodeIds) {
+                nodesInSubgraphs.add(nid);
+            }
         }
-        // Edge definitions
+        const topLevelSubgraphs = model.subgraphs.filter(sg => !sg.parentId);
+        for (const sg of topLevelSubgraphs) {
+            this.serializeSubgraph(sg, model, lines, 1);
+        }
+        for (const node of model.nodes.values()) {
+            if (!nodesInSubgraphs.has(node.id)) {
+                lines.push(`    ${this.serializeNode(node)}`);
+            }
+        }
         for (const edge of model.edges) {
             lines.push(`    ${this.serializeEdge(edge, model)}`);
         }
         return lines.join('\n') + '\n';
+    }
+    serializeSubgraph(sg, model, lines, depth) {
+        const indent = '    '.repeat(depth);
+        const labelPart = sg.label !== sg.id ? `[${sg.label}]` : '';
+        lines.push(`${indent}subgraph ${sg.id}${labelPart}`);
+        if (sg.direction) {
+            lines.push(`${indent}    direction ${sg.direction}`);
+        }
+        const children = model.subgraphs.filter(s => s.parentId === sg.id);
+        for (const child of children) {
+            this.serializeSubgraph(child, model, lines, depth + 1);
+        }
+        for (const nodeId of sg.nodeIds) {
+            const node = model.nodes.get(nodeId);
+            if (node) {
+                const isInChildSubgraph = children.some(c => c.nodeIds.includes(nodeId));
+                if (!isInChildSubgraph) {
+                    lines.push(`${indent}    ${this.serializeNode(node)}`);
+                }
+            }
+        }
+        lines.push(`${indent}end`);
     }
     serializeNode(node) {
         const [open, close] = MERMAID_SHAPE_SYNTAX[node.shape];
@@ -164,61 +197,99 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "19.2.20", ngImpo
             args: [{ providedIn: 'root' }]
         }] });
 
-/**
- * Parses a subset of Mermaid flowchart syntax into the IR.
- * Handles: direction, node definitions (all shapes), edges (all types), labels.
- */
 class MermaidDeserializerService {
     deserialize(text) {
         const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('%%'));
-        // First line must be the direction
         const dirMatch = lines[0]?.match(/^(?:flowchart|graph)\s+(TD|TB|LR|RL|BT)/i);
         if (!dirMatch)
             return null;
         const direction = (dirMatch[1].toUpperCase() === 'TB' ? 'TD' : dirMatch[1].toUpperCase());
         const model = createEmptyModel(direction);
         let edgeCounter = 0;
+        const subgraphStack = [];
         for (let i = 1; i < lines.length; i++) {
             const line = lines[i];
-            // Try to parse as edge (must check before standalone node)
-            const edgeParsed = this.parseEdge(line);
-            if (edgeParsed) {
-                // Ensure source and target nodes exist
-                this.ensureNode(model, edgeParsed.sourceId, edgeParsed.sourceLabel, edgeParsed.sourceShape);
-                this.ensureNode(model, edgeParsed.targetId, edgeParsed.targetLabel, edgeParsed.targetShape);
-                model.edges.push({
-                    id: `e${edgeCounter++}`,
-                    sourceId: edgeParsed.sourceId,
-                    targetId: edgeParsed.targetId,
-                    label: edgeParsed.label,
-                    type: edgeParsed.type,
-                });
+            if (line === 'end') {
+                subgraphStack.pop();
                 continue;
             }
-            // Try to parse as standalone node definition
+            const subgraphParsed = this.parseSubgraphLine(line);
+            if (subgraphParsed) {
+                const parentId = subgraphStack.length > 0 ? subgraphStack[subgraphStack.length - 1].id : undefined;
+                const sg = {
+                    id: subgraphParsed.id,
+                    label: subgraphParsed.label,
+                    nodeIds: [],
+                    parentId,
+                };
+                model.subgraphs.push(sg);
+                subgraphStack.push(sg);
+                continue;
+            }
+            const directionParsed = line.match(/^direction\s+(TD|TB|LR|RL|BT)$/i);
+            if (directionParsed && subgraphStack.length > 0) {
+                const d = directionParsed[1].toUpperCase() === 'TB' ? 'TD' : directionParsed[1].toUpperCase();
+                subgraphStack[subgraphStack.length - 1].direction = d;
+                continue;
+            }
+            const chainEdges = this.parseChainEdge(line);
+            if (chainEdges) {
+                for (const edgeParsed of chainEdges) {
+                    this.ensureNode(model, edgeParsed.sourceId, edgeParsed.sourceLabel, edgeParsed.sourceShape);
+                    this.ensureNode(model, edgeParsed.targetId, edgeParsed.targetLabel, edgeParsed.targetShape);
+                    this.trackNodeInSubgraph(subgraphStack, edgeParsed.sourceId);
+                    this.trackNodeInSubgraph(subgraphStack, edgeParsed.targetId);
+                    model.edges.push({
+                        id: `e${edgeCounter++}`,
+                        sourceId: edgeParsed.sourceId,
+                        targetId: edgeParsed.targetId,
+                        label: edgeParsed.label,
+                        type: edgeParsed.type,
+                    });
+                }
+                continue;
+            }
             const nodeParsed = this.parseNodeDef(line);
             if (nodeParsed) {
                 this.ensureNode(model, nodeParsed.id, nodeParsed.label, nodeParsed.shape);
+                this.trackNodeInSubgraph(subgraphStack, nodeParsed.id);
                 continue;
             }
         }
         return model;
+    }
+    trackNodeInSubgraph(stack, nodeId) {
+        if (stack.length > 0) {
+            const current = stack[stack.length - 1];
+            if (!current.nodeIds.includes(nodeId)) {
+                current.nodeIds.push(nodeId);
+            }
+        }
+    }
+    parseSubgraphLine(text) {
+        const match = text.match(/^subgraph\s+(\w+)\s*(?:\[([^\]]*)\])?\s*$/);
+        if (!match)
+            return null;
+        const id = match[1];
+        let label = match[2]?.trim() ?? id;
+        if ((label.startsWith('"') && label.endsWith('"')) ||
+            (label.startsWith("'") && label.endsWith("'"))) {
+            label = label.slice(1, -1);
+        }
+        return { id, label };
     }
     ensureNode(model, id, label, shape) {
         if (!model.nodes.has(id)) {
             model.nodes.set(id, { id, label: label ?? id, shape: shape ?? 'rectangle' });
         }
         else if (label && label !== id) {
-            // Update label/shape if a definition provides more detail
             const existing = model.nodes.get(id);
             existing.label = label;
             if (shape)
                 existing.shape = shape;
         }
     }
-    /** Parse a node definition like: A["text"], B("text"), C{text}, etc. */
     parseNodeDef(text) {
-        // Match node ID followed by shape brackets
         const match = text.match(/^(\w+)\s*([\[\(\{<>].*)/);
         if (!match)
             return null;
@@ -227,7 +298,6 @@ class MermaidDeserializerService {
         return this.parseShapeAndLabel(id, rest);
     }
     parseShapeAndLabel(id, rest) {
-        // Order matters: check multi-char delimiters first
         const patterns = [
             { open: '([', close: '])', shape: 'stadium' },
             { open: '((', close: '))', shape: 'circle' },
@@ -244,7 +314,6 @@ class MermaidDeserializerService {
         for (const { open, close, shape } of patterns) {
             if (rest.startsWith(open) && rest.endsWith(close)) {
                 let label = rest.slice(open.length, rest.length - close.length).trim();
-                // Strip quotes
                 if ((label.startsWith('"') && label.endsWith('"')) ||
                     (label.startsWith("'") && label.endsWith("'"))) {
                     label = label.slice(1, -1);
@@ -255,45 +324,65 @@ class MermaidDeserializerService {
         }
         return null;
     }
-    /** Parse an edge line like: A -->|"text"| B or A --> B */
-    parseEdge(text) {
-        // Regex to find the edge connector in the middle
+    parseChainEdge(text) {
         const edgeConnectors = [
-            { pattern: /\s-\.->(?:\|([^|]*)\|)?\s/, type: 'dotted-arrow' },
-            { pattern: /\s==>(?:\|([^|]*)\|)?\s/, type: 'thick-arrow' },
-            { pattern: /\s-->(?:\|([^|]*)\|)?\s/, type: 'arrow' },
-            { pattern: /\s---(?:\|([^|]*)\|)?\s/, type: 'open' },
+            { regex: /-\.->(?:\|([^|]*)\|)?/, type: 'dotted-arrow' },
+            { regex: /==>(?:\|([^|]*)\|)?/, type: 'thick-arrow' },
+            { regex: /-->(?:\|([^|]*)\|)?/, type: 'arrow' },
+            { regex: /---(?:\|([^|]*)\|)?/, type: 'open' },
         ];
-        for (const { pattern, type } of edgeConnectors) {
-            const match = text.match(pattern);
-            if (match) {
-                const idx = match.index;
-                const srcPart = text.slice(0, idx).trim();
-                const tgtPart = text.slice(idx + match[0].length).trim();
-                let edgeLabel = match[1]?.trim();
-                if (edgeLabel) {
-                    // Strip quotes from edge label
-                    if ((edgeLabel.startsWith('"') && edgeLabel.endsWith('"')) ||
-                        (edgeLabel.startsWith("'") && edgeLabel.endsWith("'"))) {
-                        edgeLabel = edgeLabel.slice(1, -1);
+        const combinedPattern = /(?:-\.->(?:\|[^|]*\|)?|==>(?:\|[^|]*\|)?|-->(?:\|[^|]*\|)?|---(?:\|[^|]*\|)?)/;
+        if (!combinedPattern.test(text))
+            return null;
+        const segments = [];
+        const connectors = [];
+        let remaining = text;
+        while (remaining.length > 0) {
+            let earliest = null;
+            for (const { regex, type } of edgeConnectors) {
+                const m = remaining.match(regex);
+                if (m && m.index !== undefined) {
+                    if (!earliest || m.index < earliest.index) {
+                        let edgeLabel = m[1]?.trim();
+                        if (edgeLabel) {
+                            if ((edgeLabel.startsWith('"') && edgeLabel.endsWith('"')) ||
+                                (edgeLabel.startsWith("'") && edgeLabel.endsWith("'"))) {
+                                edgeLabel = edgeLabel.slice(1, -1);
+                            }
+                            edgeLabel = edgeLabel.replace(/#quot;/g, '"');
+                        }
+                        earliest = { index: m.index, matchLen: m[0].length, type, label: edgeLabel || undefined };
                     }
-                    edgeLabel = edgeLabel.replace(/#quot;/g, '"');
                 }
-                const src = this.parseInlineNode(srcPart);
-                const tgt = this.parseInlineNode(tgtPart);
-                if (!src || !tgt)
-                    return null;
-                return {
-                    sourceId: src.id, sourceLabel: src.label, sourceShape: src.shape,
-                    targetId: tgt.id, targetLabel: tgt.label, targetShape: tgt.shape,
-                    label: edgeLabel || undefined,
-                    type,
-                };
             }
+            if (!earliest) {
+                segments.push(remaining.trim());
+                break;
+            }
+            const beforeConnector = remaining.slice(0, earliest.index).trim();
+            if (beforeConnector) {
+                segments.push(beforeConnector);
+            }
+            connectors.push({ type: earliest.type, label: earliest.label });
+            remaining = remaining.slice(earliest.index + earliest.matchLen);
         }
-        return null;
+        if (segments.length < 2 || connectors.length < 1)
+            return null;
+        const edges = [];
+        for (let i = 0; i < connectors.length; i++) {
+            const src = this.parseInlineNode(segments[i]);
+            const tgt = this.parseInlineNode(segments[i + 1]);
+            if (!src || !tgt)
+                return null;
+            edges.push({
+                sourceId: src.id, sourceLabel: src.label, sourceShape: src.shape,
+                targetId: tgt.id, targetLabel: tgt.label, targetShape: tgt.shape,
+                label: connectors[i].label,
+                type: connectors[i].type,
+            });
+        }
+        return edges;
     }
-    /** Parse a node reference that may be just an ID or ID with shape: A, A["text"], A{text}, etc. */
     parseInlineNode(text) {
         const idMatch = text.match(/^(\w+)/);
         if (!idMatch)
@@ -789,6 +878,7 @@ class CanvasComponent {
             direction: this.state.model().direction,
             nodes: new Map(),
             edges: [],
+            subgraphs: this.state.model().subgraphs ?? [],
         };
         const childCount = parent.getChildCount();
         let edgeCounter = 0;

@@ -1,20 +1,15 @@
 import { Injectable } from '@angular/core';
 import {
-  FlowchartModel, FlowNode, FlowEdge, FlowDirection,
+  FlowchartModel, FlowNode, FlowEdge, FlowDirection, FlowSubgraph,
   MermaidShape, MermaidEdgeType, createEmptyModel,
 } from '../models/graph-model';
 
-/**
- * Parses a subset of Mermaid flowchart syntax into the IR.
- * Handles: direction, node definitions (all shapes), edges (all types), labels.
- */
 @Injectable({ providedIn: 'root' })
 export class MermaidDeserializerService {
 
   deserialize(text: string): FlowchartModel | null {
     const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('%%'));
 
-    // First line must be the direction
     const dirMatch = lines[0]?.match(/^(?:flowchart|graph)\s+(TD|TB|LR|RL|BT)/i);
     if (!dirMatch) return null;
 
@@ -22,30 +17,59 @@ export class MermaidDeserializerService {
     const model = createEmptyModel(direction);
 
     let edgeCounter = 0;
+    const subgraphStack: FlowSubgraph[] = [];
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
 
-      // Try to parse as edge (must check before standalone node)
-      const edgeParsed = this.parseEdge(line);
-      if (edgeParsed) {
-        // Ensure source and target nodes exist
-        this.ensureNode(model, edgeParsed.sourceId, edgeParsed.sourceLabel, edgeParsed.sourceShape);
-        this.ensureNode(model, edgeParsed.targetId, edgeParsed.targetLabel, edgeParsed.targetShape);
-        model.edges.push({
-          id: `e${edgeCounter++}`,
-          sourceId: edgeParsed.sourceId,
-          targetId: edgeParsed.targetId,
-          label: edgeParsed.label,
-          type: edgeParsed.type,
-        });
+      if (line === 'end') {
+        subgraphStack.pop();
         continue;
       }
 
-      // Try to parse as standalone node definition
+      const subgraphParsed = this.parseSubgraphLine(line);
+      if (subgraphParsed) {
+        const parentId = subgraphStack.length > 0 ? subgraphStack[subgraphStack.length - 1].id : undefined;
+        const sg: FlowSubgraph = {
+          id: subgraphParsed.id,
+          label: subgraphParsed.label,
+          nodeIds: [],
+          parentId,
+        };
+        model.subgraphs.push(sg);
+        subgraphStack.push(sg);
+        continue;
+      }
+
+      const directionParsed = line.match(/^direction\s+(TD|TB|LR|RL|BT)$/i);
+      if (directionParsed && subgraphStack.length > 0) {
+        const d = directionParsed[1].toUpperCase() === 'TB' ? 'TD' : directionParsed[1].toUpperCase();
+        subgraphStack[subgraphStack.length - 1].direction = d as FlowDirection;
+        continue;
+      }
+
+      const chainEdges = this.parseChainEdge(line);
+      if (chainEdges) {
+        for (const edgeParsed of chainEdges) {
+          this.ensureNode(model, edgeParsed.sourceId, edgeParsed.sourceLabel, edgeParsed.sourceShape);
+          this.ensureNode(model, edgeParsed.targetId, edgeParsed.targetLabel, edgeParsed.targetShape);
+          this.trackNodeInSubgraph(subgraphStack, edgeParsed.sourceId);
+          this.trackNodeInSubgraph(subgraphStack, edgeParsed.targetId);
+          model.edges.push({
+            id: `e${edgeCounter++}`,
+            sourceId: edgeParsed.sourceId,
+            targetId: edgeParsed.targetId,
+            label: edgeParsed.label,
+            type: edgeParsed.type,
+          });
+        }
+        continue;
+      }
+
       const nodeParsed = this.parseNodeDef(line);
       if (nodeParsed) {
         this.ensureNode(model, nodeParsed.id, nodeParsed.label, nodeParsed.shape);
+        this.trackNodeInSubgraph(subgraphStack, nodeParsed.id);
         continue;
       }
     }
@@ -53,20 +77,38 @@ export class MermaidDeserializerService {
     return model;
   }
 
+  private trackNodeInSubgraph(stack: FlowSubgraph[], nodeId: string): void {
+    if (stack.length > 0) {
+      const current = stack[stack.length - 1];
+      if (!current.nodeIds.includes(nodeId)) {
+        current.nodeIds.push(nodeId);
+      }
+    }
+  }
+
+  private parseSubgraphLine(text: string): { id: string; label: string } | null {
+    const match = text.match(/^subgraph\s+(\w+)\s*(?:\[([^\]]*)\])?\s*$/);
+    if (!match) return null;
+    const id = match[1];
+    let label = match[2]?.trim() ?? id;
+    if ((label.startsWith('"') && label.endsWith('"')) ||
+        (label.startsWith("'") && label.endsWith("'"))) {
+      label = label.slice(1, -1);
+    }
+    return { id, label };
+  }
+
   private ensureNode(model: FlowchartModel, id: string, label?: string, shape?: MermaidShape): void {
     if (!model.nodes.has(id)) {
       model.nodes.set(id, { id, label: label ?? id, shape: shape ?? 'rectangle' });
     } else if (label && label !== id) {
-      // Update label/shape if a definition provides more detail
       const existing = model.nodes.get(id)!;
       existing.label = label;
       if (shape) existing.shape = shape;
     }
   }
 
-  /** Parse a node definition like: A["text"], B("text"), C{text}, etc. */
   private parseNodeDef(text: string): { id: string; label: string; shape: MermaidShape } | null {
-    // Match node ID followed by shape brackets
     const match = text.match(/^(\w+)\s*([\[\(\{<>].*)/);
     if (!match) return null;
 
@@ -76,7 +118,6 @@ export class MermaidDeserializerService {
   }
 
   private parseShapeAndLabel(id: string, rest: string): { id: string; label: string; shape: MermaidShape } | null {
-    // Order matters: check multi-char delimiters first
     const patterns: Array<{ open: string; close: string; shape: MermaidShape }> = [
       { open: '([', close: '])', shape: 'stadium' },
       { open: '((', close: '))', shape: 'circle' },
@@ -94,7 +135,6 @@ export class MermaidDeserializerService {
     for (const { open, close, shape } of patterns) {
       if (rest.startsWith(open) && rest.endsWith(close)) {
         let label = rest.slice(open.length, rest.length - close.length).trim();
-        // Strip quotes
         if ((label.startsWith('"') && label.endsWith('"')) ||
             (label.startsWith("'") && label.endsWith("'"))) {
           label = label.slice(1, -1);
@@ -107,53 +147,82 @@ export class MermaidDeserializerService {
     return null;
   }
 
-  /** Parse an edge line like: A -->|"text"| B or A --> B */
-  private parseEdge(text: string): {
+  private parseChainEdge(text: string): Array<{
     sourceId: string; sourceLabel?: string; sourceShape?: MermaidShape;
     targetId: string; targetLabel?: string; targetShape?: MermaidShape;
     label?: string; type: MermaidEdgeType;
-  } | null {
-    // Regex to find the edge connector in the middle
-    const edgeConnectors: Array<{ pattern: RegExp; type: MermaidEdgeType }> = [
-      { pattern: /\s-\.->(?:\|([^|]*)\|)?\s/, type: 'dotted-arrow' },
-      { pattern: /\s==>(?:\|([^|]*)\|)?\s/,   type: 'thick-arrow' },
-      { pattern: /\s-->(?:\|([^|]*)\|)?\s/,    type: 'arrow' },
-      { pattern: /\s---(?:\|([^|]*)\|)?\s/,    type: 'open' },
+  }> | null {
+    const edgeConnectors: Array<{ regex: RegExp; type: MermaidEdgeType }> = [
+      { regex: /-\.->(?:\|([^|]*)\|)?/, type: 'dotted-arrow' },
+      { regex: /==>(?:\|([^|]*)\|)?/,   type: 'thick-arrow' },
+      { regex: /-->(?:\|([^|]*)\|)?/,    type: 'arrow' },
+      { regex: /---(?:\|([^|]*)\|)?/,    type: 'open' },
     ];
 
-    for (const { pattern, type } of edgeConnectors) {
-      const match = text.match(pattern);
-      if (match) {
-        const idx = match.index!;
-        const srcPart = text.slice(0, idx).trim();
-        const tgtPart = text.slice(idx + match[0].length).trim();
-        let edgeLabel = match[1]?.trim();
-        if (edgeLabel) {
-          // Strip quotes from edge label
-          if ((edgeLabel.startsWith('"') && edgeLabel.endsWith('"')) ||
-              (edgeLabel.startsWith("'") && edgeLabel.endsWith("'"))) {
-            edgeLabel = edgeLabel.slice(1, -1);
+    const combinedPattern = /(?:-\.->(?:\|[^|]*\|)?|==>(?:\|[^|]*\|)?|-->(?:\|[^|]*\|)?|---(?:\|[^|]*\|)?)/;
+    if (!combinedPattern.test(text)) return null;
+
+    const segments: string[] = [];
+    const connectors: Array<{ type: MermaidEdgeType; label?: string }> = [];
+
+    let remaining = text;
+    while (remaining.length > 0) {
+      let earliest: { index: number; matchLen: number; type: MermaidEdgeType; label?: string } | null = null;
+
+      for (const { regex, type } of edgeConnectors) {
+        const m = remaining.match(regex);
+        if (m && m.index !== undefined) {
+          if (!earliest || m.index < earliest.index) {
+            let edgeLabel = m[1]?.trim();
+            if (edgeLabel) {
+              if ((edgeLabel.startsWith('"') && edgeLabel.endsWith('"')) ||
+                  (edgeLabel.startsWith("'") && edgeLabel.endsWith("'"))) {
+                edgeLabel = edgeLabel.slice(1, -1);
+              }
+              edgeLabel = edgeLabel.replace(/#quot;/g, '"');
+            }
+            earliest = { index: m.index, matchLen: m[0].length, type, label: edgeLabel || undefined };
           }
-          edgeLabel = edgeLabel.replace(/#quot;/g, '"');
         }
-
-        const src = this.parseInlineNode(srcPart);
-        const tgt = this.parseInlineNode(tgtPart);
-        if (!src || !tgt) return null;
-
-        return {
-          sourceId: src.id, sourceLabel: src.label, sourceShape: src.shape,
-          targetId: tgt.id, targetLabel: tgt.label, targetShape: tgt.shape,
-          label: edgeLabel || undefined,
-          type,
-        };
       }
+
+      if (!earliest) {
+        segments.push(remaining.trim());
+        break;
+      }
+
+      const beforeConnector = remaining.slice(0, earliest.index).trim();
+      if (beforeConnector) {
+        segments.push(beforeConnector);
+      }
+      connectors.push({ type: earliest.type, label: earliest.label });
+      remaining = remaining.slice(earliest.index + earliest.matchLen);
     }
 
-    return null;
+    if (segments.length < 2 || connectors.length < 1) return null;
+
+    const edges: Array<{
+      sourceId: string; sourceLabel?: string; sourceShape?: MermaidShape;
+      targetId: string; targetLabel?: string; targetShape?: MermaidShape;
+      label?: string; type: MermaidEdgeType;
+    }> = [];
+
+    for (let i = 0; i < connectors.length; i++) {
+      const src = this.parseInlineNode(segments[i]);
+      const tgt = this.parseInlineNode(segments[i + 1]);
+      if (!src || !tgt) return null;
+
+      edges.push({
+        sourceId: src.id, sourceLabel: src.label, sourceShape: src.shape,
+        targetId: tgt.id, targetLabel: tgt.label, targetShape: tgt.shape,
+        label: connectors[i].label,
+        type: connectors[i].type,
+      });
+    }
+
+    return edges;
   }
 
-  /** Parse a node reference that may be just an ID or ID with shape: A, A["text"], A{text}, etc. */
   private parseInlineNode(text: string): { id: string; label?: string; shape?: MermaidShape } | null {
     const idMatch = text.match(/^(\w+)/);
     if (!idMatch) return null;

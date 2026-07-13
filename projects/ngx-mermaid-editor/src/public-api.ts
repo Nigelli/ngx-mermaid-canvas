@@ -10,6 +10,7 @@ export type {
   FlowchartModel,
   FlowNode,
   FlowEdge,
+  FlowSubgraph,
   FlowDirection,
   MermaidShape,
   MermaidEdgeType,

@@ -33,14 +33,23 @@ export interface FlowEdge {
   type: MermaidEdgeType;
 }
 
+export interface FlowSubgraph {
+  id: string;
+  label: string;
+  nodeIds: string[];
+  direction?: FlowDirection;
+  parentId?: string;
+}
+
 export interface FlowchartModel {
   direction: FlowDirection;
   nodes: Map<string, FlowNode>;
   edges: FlowEdge[];
+  subgraphs: FlowSubgraph[];
 }
 
 export function createEmptyModel(direction: FlowDirection = 'TD'): FlowchartModel {
-  return { direction, nodes: new Map(), edges: [] };
+  return { direction, nodes: new Map(), edges: [], subgraphs: [] };
 }
 
 export function cloneModel(model: FlowchartModel): FlowchartModel {
@@ -48,5 +57,6 @@ export function cloneModel(model: FlowchartModel): FlowchartModel {
     direction: model.direction,
     nodes: new Map(Array.from(model.nodes.entries()).map(([k, v]) => [k, { ...v }])),
     edges: model.edges.map(e => ({ ...e })),
+    subgraphs: model.subgraphs.map(s => ({ ...s, nodeIds: [...s.nodeIds] })),
   };
 }

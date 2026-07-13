@@ -17,10 +17,18 @@ export interface FlowEdge {
     label?: string;
     type: MermaidEdgeType;
 }
+export interface FlowSubgraph {
+    id: string;
+    label: string;
+    nodeIds: string[];
+    direction?: FlowDirection;
+    parentId?: string;
+}
 export interface FlowchartModel {
     direction: FlowDirection;
     nodes: Map<string, FlowNode>;
     edges: FlowEdge[];
+    subgraphs: FlowSubgraph[];
 }
 export declare function createEmptyModel(direction?: FlowDirection): FlowchartModel;
 export declare function cloneModel(model: FlowchartModel): FlowchartModel;

@@ -550,6 +550,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       direction: this.state.model().direction,
       nodes: new Map(),
       edges: [],
+      subgraphs: this.state.model().subgraphs ?? [],
     };
 
     const childCount = parent.getChildCount();

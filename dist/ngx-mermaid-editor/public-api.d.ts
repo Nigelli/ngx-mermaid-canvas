@@ -1,5 +1,5 @@
 export { MermaidEditorComponent } from './lib/components/mermaid-editor.component';
-export type { FlowchartModel, FlowNode, FlowEdge, FlowDirection, MermaidShape, MermaidEdgeType, } from './lib/models/graph-model';
+export type { FlowchartModel, FlowNode, FlowEdge, FlowSubgraph, FlowDirection, MermaidShape, MermaidEdgeType, } from './lib/models/graph-model';
 export { createEmptyModel, cloneModel } from './lib/models/graph-model';
 export { MermaidSerializerService } from './lib/services/mermaid-serializer.service';
 export { MermaidDeserializerService } from './lib/services/mermaid-deserializer.service';
