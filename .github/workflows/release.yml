@@ -42,7 +42,10 @@ jobs:
         run: npm run build:lib
 
       - name: Publish to npm with provenance
-        run: npm publish --provenance
+        # --access public is required (not just implied) when publishing a NEW
+        # unscoped package with --provenance: npm won't infer public access for
+        # a package that doesn't exist yet and errors with EUSAGE otherwise.
+        run: npm publish --provenance --access public
         working-directory: dist/ngx-mermaid-editor
         env:
           # ---------------------------------------------------------------
