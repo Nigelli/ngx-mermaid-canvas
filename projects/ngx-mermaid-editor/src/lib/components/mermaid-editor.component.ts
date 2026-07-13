@@ -12,7 +12,7 @@ import { GraphStateService } from '../services/graph-state.service';
 import { FlowchartModel, FlowDirection, MermaidShape, MermaidEdgeType } from '../models/graph-model';
 
 @Component({
-  selector: 'ngx-mermaid-editor',
+  selector: 'ngx-mermaid-canvas',
   standalone: true,
   imports: [
     CanvasComponent,

@@ -1,5 +1,5 @@
 import { Component } from '@angular/core';
-import { MermaidEditorComponent, FlowchartModel } from 'ngx-mermaid-editor';
+import { MermaidEditorComponent, FlowchartModel } from 'ngx-mermaid-canvas';
 
 @Component({
   selector: 'app-root',
@@ -12,7 +12,7 @@ import { MermaidEditorComponent, FlowchartModel } from 'ngx-mermaid-editor';
         <span class="subtitle">draw.io-style editor for Mermaid flowcharts</span>
       </header>
       <div class="editor-wrapper">
-        <ngx-mermaid-editor
+        <ngx-mermaid-canvas
           [mermaidText]="initialMermaid"
           [showTextEditor]="true"
           [showPreview]="true"
