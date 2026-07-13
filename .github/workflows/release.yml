@@ -7,9 +7,13 @@ on:
     tags:
       - 'v*'
 
-# `id-token: write` is required for npm provenance (OIDC token exchange with
-# npm's Sigstore-backed attestation service). `contents: read` is the
-# minimal permission needed to check out the repo.
+# `id-token: write` is required for npm Trusted Publishing (OIDC): npm exchanges
+# this short-lived GitHub OIDC token for publish auth, so no long-lived NPM_TOKEN
+# is needed, and it also powers provenance/Sigstore attestation. `contents: read`
+# is the minimal permission needed to check out the repo.
+#
+# Trusted Publishing is configured on the npm side (package -> Settings -> Trusted
+# Publisher) and must match this repo AND this workflow's filename (release.yml).
 permissions:
   contents: read
   id-token: write
@@ -31,9 +35,14 @@ jobs:
         with:
           node-version: 20.x
           cache: npm
-          # Required so `npm publish` targets the public npm registry and
-          # picks up NODE_AUTH_TOKEN below for auth.
+          # Points the publish at the public npm registry (and writes the
+          # .npmrc that the OIDC flow uses).
           registry-url: 'https://registry.npmjs.org'
+
+      # Node 20/22 ship npm 10.x, which predates OIDC Trusted Publishing.
+      # Upgrade to npm >= 11.5.1 so `npm publish` performs the OIDC exchange.
+      - name: Upgrade npm (Trusted Publishing / OIDC support)
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -41,25 +50,11 @@ jobs:
       - name: Build library (production)
         run: npm run build:lib
 
-      - name: Publish to npm with provenance
-        # --access public is required (not just implied) when publishing a NEW
-        # unscoped package with --provenance: npm won't infer public access for
-        # a package that doesn't exist yet and errors with EUSAGE otherwise.
+      # Auth is via OIDC Trusted Publishing (no NODE_AUTH_TOKEN / NPM_TOKEN).
+      # --provenance is generated automatically under Trusted Publishing, but is
+      # kept explicit for clarity. --access public is harmless on the now-existing
+      # public package and guards against a private default on future first
+      # publishes of any new entry point.
+      - name: Publish to npm (Trusted Publishing + provenance)
         run: npm publish --provenance --access public
         working-directory: dist/ngx-mermaid-editor
-        env:
-          # ---------------------------------------------------------------
-          # MAINTAINER ACTION REQUIRED:
-          # This workflow reads an `NPM_TOKEN` repository (or environment)
-          # secret that does NOT exist yet and must be created by a repo
-          # admin before this job can succeed:
-          #   1. Create an npm access token with "Automation" (or
-          #      "Granular Access Token" with publish rights to the
-          #      `ngx-mermaid-canvas` package) at https://www.npmjs.com/.
-          #   2. In GitHub: Settings -> Secrets and variables -> Actions ->
-          #      New repository secret, name it exactly `NPM_TOKEN`, and
-          #      paste the npm token as the value.
-          # No secret is invented or assumed here; the workflow will fail
-          # at the publish step with an auth error until this is done.
-          # ---------------------------------------------------------------
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
