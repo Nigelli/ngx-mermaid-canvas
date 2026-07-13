@@ -1,12 +1,13 @@
 import { Injectable, signal, computed, WritableSignal } from '@angular/core';
-import { FlowchartModel, FlowDirection, createEmptyModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType, cloneModel } from '../models/graph-model';
+import { FlowchartModel, FlowDirection, createEmptyModel, MermaidEdgeType, cloneModel } from '../models/graph-model';
 import { MermaidSerializerService } from './mermaid-serializer.service';
 import { MermaidDeserializerService } from './mermaid-deserializer.service';
 import { LayoutService } from './layout.service';
 
 export type ChangeSource = 'canvas' | 'text' | 'none';
+export type CanvasMode = 'select' | 'pan';
 
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class GraphStateService {
 
   readonly model: WritableSignal<FlowchartModel> = signal(createEmptyModel());
@@ -25,6 +26,12 @@ export class GraphStateService {
   readonly hasSelectedEdges: WritableSignal<boolean> = signal(false);
   readonly selectedEdgeType: WritableSignal<MermaidEdgeType | null> = signal(null);
   readonly hasSelection = computed(() => this.selectionCount() > 0);
+
+  /** Current interaction mode */
+  readonly canvasMode: WritableSignal<CanvasMode> = signal('select');
+
+  /** When true, all interaction is disabled */
+  readonly disabled: WritableSignal<boolean> = signal(false);
 
   private nodeCounter = 0;
 
@@ -58,6 +65,13 @@ export class GraphStateService {
 
   /** Set initial state from input binding */
   initFromText(text: string): void {
+    if (!text || !text.trim()) {
+      this.model.set(createEmptyModel());
+      this.mermaidText.set('');
+      this.nodeCounter = 0;
+      return;
+    }
+
     const parsed = this.deserializer.deserialize(text);
     if (!parsed) return;
 

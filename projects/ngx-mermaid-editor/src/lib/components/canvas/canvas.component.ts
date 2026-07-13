@@ -1,14 +1,14 @@
 import {
   Component, ElementRef, ViewChild, AfterViewInit, OnDestroy,
-  inject, effect, output, NgZone, Injector, runInInjectionContext, ChangeDetectorRef,
+  inject, effect, NgZone, Injector, runInInjectionContext, ChangeDetectorRef,
 } from '@angular/core';
 import {
   Graph, InternalEvent, UndoManager, RubberBandHandler, KeyHandler, Cell, CellStyle,
-  ConnectionConstraint, Outline, type EventObject, Point,
+  ConnectionConstraint, Outline, type EventObject, Point, HexagonShape, ShapeRegistry,
 } from '@maxgraph/core';
 import { GraphStateService } from '../../services/graph-state.service';
 import { LayoutService } from '../../services/layout.service';
-import { FlowchartModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType, cloneModel } from '../../models/graph-model';
+import { FlowchartModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType } from '../../models/graph-model';
 import { getVertexStyle, styleToShape, getDefaultSize } from '../../models/shape-map';
 import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
 
@@ -17,7 +17,34 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
   standalone: true,
   template: `
     <div #graphContainer class="graph-container" (contextmenu)="onContextMenu($event)"></div>
+    <svg #portOverlay class="port-overlay"></svg>
     <div #minimapContainer class="minimap"></div>
+    @if (radialMenu) {
+      <div class="radial-menu" [style.left.px]="radialMenu.x" [style.top.px]="radialMenu.y">
+        @for (item of radialMenuItems; track item.shape; let i = $index) {
+          <button
+            class="radial-item"
+            [style.transform]="getRadialPosition(i)"
+            [title]="item.label"
+            (mousedown)="addFromRadial(item.shape); $event.stopPropagation()"
+          >
+            <svg viewBox="0 0 32 24" class="radial-icon">
+              @switch (item.shape) {
+                @case ('rectangle') { <rect x="2" y="2" width="28" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('rounded') { <rect x="2" y="2" width="28" height="20" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('diamond') { <polygon points="16,1 31,12 16,23 1,12" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('circle') { <ellipse cx="16" cy="12" rx="12" ry="10" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('stadium') { <rect x="2" y="2" width="28" height="20" rx="10" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('hexagon') { <polygon points="8,1 24,1 31,12 24,23 8,23 1,12" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('cylinder') { <path d="M6,6 Q16,2 26,6 L26,18 Q16,22 6,18 Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6,6 Q16,10 26,6" fill="none" stroke="currentColor" stroke-width="1"/> }
+                @case ('trapezoid') { <polygon points="6,2 26,2 30,22 2,22" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+              }
+            </svg>
+            <span class="radial-label">{{ item.label }}</span>
+          </button>
+        }
+      </div>
+    }
     @if (contextMenu) {
       <div class="context-menu" [style.left.px]="contextMenu.x" [style.top.px]="contextMenu.y">
         @if (contextMenu.cell) {
@@ -45,17 +72,27 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
     }
   `,
   styles: [`
-    :host { display: block; width: 100%; height: 100%; }
-    :host { position: relative; }
+    :host { display: block; width: 100%; height: 100%; position: relative; user-select: none; }
     .graph-container {
       width: 100%;
       height: 100%;
-      overflow: auto;
+      overflow: hidden;
       cursor: default;
       position: relative;
       background-color: #f8f9fa;
       background-image: radial-gradient(circle, #d0d0d0 1px, transparent 1px);
       background-size: 20px 20px;
+      user-select: none;
+    }
+    .port-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+      overflow: visible;
     }
     /* maxGraph inline cell editor — make it visible with a clear border */
     :host ::ng-deep .mxCellEditor {
@@ -90,6 +127,44 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       overflow: hidden;
       z-index: 10;
     }
+    .radial-menu {
+      position: absolute;
+      z-index: 1000;
+      width: 0;
+      height: 0;
+    }
+    .radial-item {
+      position: absolute;
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      border: 1px solid #d0d0d0;
+      background: #fff;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+      transition: background 0.12s;
+      color: #444;
+      padding: 2px;
+    }
+    .radial-item:hover {
+      background: #f0f4ff;
+      border-color: #999;
+    }
+    .radial-icon {
+      width: 20px;
+      height: 14px;
+    }
+    .radial-label {
+      font-size: 7px;
+      line-height: 1;
+      color: #666;
+      white-space: nowrap;
+    }
     .context-menu {
       position: absolute;
       z-index: 1000;
@@ -123,14 +198,44 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
 })
 export class CanvasComponent implements AfterViewInit, OnDestroy {
   @ViewChild('graphContainer', { static: true }) containerRef!: ElementRef<HTMLDivElement>;
+  @ViewChild('portOverlay', { static: true }) portOverlayRef!: ElementRef<SVGElement>;
   @ViewChild('minimapContainer', { static: true }) minimapRef!: ElementRef<HTMLDivElement>;
 
   private graph!: Graph;
   private undoManager!: UndoManager;
   private suppressEvents = false;
   contextMenu: { x: number; y: number; cell: Cell | null; isEdge: boolean; graphX: number; graphY: number; selectedCells: Cell[] } | null = null;
+  radialMenu: { x: number; y: number; graphX: number; graphY: number } | null = null;
+
+  radialMenuItems: Array<{ shape: MermaidShape; label: string }> = [
+    { shape: 'rectangle', label: 'Process' },
+    { shape: 'rounded', label: 'Start/End' },
+    { shape: 'diamond', label: 'Decision' },
+    { shape: 'circle', label: 'Event' },
+    { shape: 'stadium', label: 'Terminal' },
+    { shape: 'hexagon', label: 'Prepare' },
+    { shape: 'cylinder', label: 'Database' },
+    { shape: 'trapezoid', label: 'Manual' },
+  ];
   clipboardCells: Cell[] = [];
   private documentListeners: Array<() => void> = [];
+
+  // Port hover indicator
+  private hoveredCell: Cell | null = null;
+
+  // Rubberband (drag-to-select) handler reference
+  private rubberband!: RubberBandHandler;
+  private wheelTimeout: any = null;
+
+  // Pan state (mode pan, spacebar pan, or middle-click pan)
+  private isPanning = false;
+  private panStartX = 0;
+  private panStartY = 0;
+  private panStartTranslateX = 0;
+  private panStartTranslateY = 0;
+  private isSpaceHeld = false;
+  private isMiddleMousePan = false;
+
 
   private state = inject(GraphStateService);
   private layoutService = inject(LayoutService);
@@ -154,6 +259,23 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
           this.zone.runOutsideAngular(() => this.syncFromModel(model));
         }
       });
+
+      // React to mode changes
+      effect(() => {
+        const mode = this.state.canvasMode();
+        this.zone.runOutsideAngular(() => this.applyMode(mode));
+      });
+
+      // React to disabled state
+      effect(() => {
+        const disabled = this.state.disabled();
+        this.zone.runOutsideAngular(() => {
+          this.graph.setEnabled(!disabled);
+          if (disabled) {
+            this.containerRef.nativeElement.style.cursor = 'default';
+          }
+        });
+      });
     });
   }
 
@@ -170,17 +292,23 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     //    so menu clicks never reach this listener — no filtering needed.
     // 2) Capture-phase on document — catches clicks outside the component entirely
     //    (toolbar, text editor, preview). Must check target isn't inside the menu.
-    const dismissContextMenu = () => {
-      if (this.contextMenu) {
+    const dismissMenus = () => {
+      if (this.contextMenu || this.radialMenu) {
         this.contextMenu = null;
+        this.radialMenu = null;
         this.cdr.detectChanges();
       }
     };
-    container.addEventListener('mousedown', dismissContextMenu, true);
+    container.addEventListener('mousedown', dismissMenus, true);
 
     const dismissIfOutsideMenu = (e: MouseEvent) => {
-      if (this.contextMenu && !(e.target as HTMLElement).closest('.context-menu')) {
+      const target = e.target as HTMLElement;
+      if (this.contextMenu && !target.closest('.context-menu')) {
         this.contextMenu = null;
+        this.cdr.detectChanges();
+      }
+      if (this.radialMenu && !target.closest('.radial-menu')) {
+        this.radialMenu = null;
         this.cdr.detectChanges();
       }
     };
@@ -188,6 +316,21 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     this.documentListeners.push(
       () => document.removeEventListener('mousedown', dismissIfOutsideMenu, true),
     );
+
+    // Register custom trapezoid shape
+    if (!ShapeRegistry.get('trapezoid')) {
+      class TrapezoidShape extends HexagonShape {
+        override redrawPath(c: any, x: number, y: number, w: number, h: number): void {
+          this.addPoints(c, [
+            new Point(0.15 * w, 0),
+            new Point(0.85 * w, 0),
+            new Point(w, h),
+            new Point(0, h),
+          ], this.isRounded, this.getBaseArcSize(), true);
+        }
+      }
+      ShapeRegistry.add('trapezoid', TrapezoidShape);
+    }
 
     this.graph = new Graph(container);
     const g = this.graph;
@@ -201,11 +344,15 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     g.setCellsEditable(true);
     g.setHtmlLabels(true);
 
-    // Snap to grid
-    g.getPlugin<any>('SelectionHandler')?.setMoveEnabled(true);
+    // Snap to grid and enable alignment guides
+    const selectionHandler = g.getPlugin<any>('SelectionHandler');
+    selectionHandler?.setMoveEnabled(true);
+    if (selectionHandler) {
+      selectionHandler.guidesEnabled = true;
+    }
 
     // Enable rubberband selection
-    new RubberBandHandler(g);
+    this.rubberband = new RubberBandHandler(g);
 
     // Keyboard shortcuts
     const keyHandler = new KeyHandler(g);
@@ -213,6 +360,21 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     // Delete/Backspace to remove
     keyHandler.bindKey(46, () => g.isEnabled() && g.removeCells());
     keyHandler.bindKey(8, () => g.isEnabled() && g.removeCells());
+
+    // Global fallback: catch Backspace/Delete even when container isn't focused
+    const onDeleteKey = (e: KeyboardEvent) => {
+      if ((e.key === 'Backspace' || e.key === 'Delete') && g.isEnabled() && !g.isEditing()) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+        const selected = g.getSelectionCells();
+        if (selected.length > 0) {
+          e.preventDefault();
+          g.removeCells();
+        }
+      }
+    };
+    document.addEventListener('keydown', onDeleteKey);
+    this.documentListeners.push(() => document.removeEventListener('keydown', onDeleteKey));
 
     // Ctrl+Z undo, Ctrl+Y redo
     keyHandler.bindControlKey(90, () => this.undo());  // Ctrl+Z
@@ -230,6 +392,10 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     keyHandler.bindControlKey(67, () => this.copyCells());  // C
     keyHandler.bindControlKey(86, () => this.zone.run(() => this.pasteCells()));  // V
 
+    // Mode shortcuts: V=select, H=pan
+    keyHandler.bindKey(86, () => this.zone.run(() => this.state.canvasMode.set('select')));  // V
+    keyHandler.bindKey(72, () => this.zone.run(() => this.state.canvasMode.set('pan')));     // H
+
     // Override isControlDown to also recognize Cmd (metaKey) on Mac
     (keyHandler as any).isControlDown = (evt: KeyboardEvent) => evt.ctrlKey || evt.metaKey;
 
@@ -240,6 +406,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     };
     g.getDataModel().addListener(InternalEvent.UNDO, listener);
     g.getView().addListener(InternalEvent.UNDO, listener);
+
+    // Clear port indicators when cells are being moved
+    g.addListener(InternalEvent.MOVE_CELLS, () => {
+      this.hoveredCell = null;
+      this.portOverlayRef.nativeElement.innerHTML = '';
+    });
 
     // Track selection changes for contextual toolbar
     g.getSelectionModel().addListener(InternalEvent.CHANGE, () => {
@@ -267,21 +439,27 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       }
     };
 
-    // Double-click handling: empty canvas = add node, edge = edit label
+    // Double-click handling: empty canvas = show radial shape menu, edge = edit label
     g.addListener(InternalEvent.DOUBLE_CLICK, (_sender: any, evt: EventObject) => {
       const cell = evt.getProperty('cell');
       if (!cell) {
-        // Clicked on empty canvas — add a rectangle at click position
         const mouseEvt = evt.getProperty('event') as MouseEvent;
+        const rect = container.getBoundingClientRect();
         const pt = g.getPointForEvent(mouseEvt);
-        this.zone.run(() => this.addNode('rectangle', pt.x - 70, pt.y - 25));
+        this.zone.run(() => {
+          this.radialMenu = {
+            x: mouseEvt.clientX - rect.left,
+            y: mouseEvt.clientY - rect.top,
+            graphX: pt.x,
+            graphY: pt.y,
+          };
+          this.cdr.detectChanges();
+        });
         evt.consume();
       } else if (cell.isEdge()) {
-        // Force start editing on edge — default handler may not trigger for edges
         g.startEditingAtCell(cell);
         evt.consume();
       }
-      // Vertices: fall through to default CellEditorHandler
     });
 
     // Define connection points on vertices (N, S, E, W)
@@ -296,6 +474,36 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       }
       return [];
     };
+
+    // Configure the connection handler:
+    // - Only trigger connections from the border region (not center/text area)
+    // - Show crosshair cursor when connection is possible
+    const connectionHandler = g.getPlugin('ConnectionHandler') as any;
+    if (connectionHandler) {
+      connectionHandler.connectImage = null;
+      connectionHandler.livePreview = true;
+      connectionHandler.cursor = 'crosshair';
+      connectionHandler.outlineConnect = true;
+
+      // Override: only start a connection when the mouse is near the cell border
+      const origIsStartEvent = connectionHandler.isStartEvent.bind(connectionHandler);
+      connectionHandler.isStartEvent = (me: any) => {
+        if (!origIsStartEvent(me)) return false;
+        // If we have a constraint point, we're on the border — allow it
+        if (connectionHandler.constraintHandler?.currentConstraint) return true;
+        // Otherwise check if mouse is near the edge of the cell
+        const state = connectionHandler.previous;
+        if (!state) return false;
+        const x = me.getGraphX();
+        const y = me.getGraphY();
+        const border = 12 / g.getView().getScale();
+        const nearLeft = x - state.x < border;
+        const nearRight = state.x + state.width - x < border;
+        const nearTop = y - state.y < border;
+        const nearBottom = state.y + state.height - y < border;
+        return nearLeft || nearRight || nearTop || nearBottom;
+      };
+    }
 
     // Set default edge style
     const defaultEdgeStyle = g.getStylesheet().getDefaultEdgeStyle();
@@ -314,16 +522,35 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
     // Initialize minimap
     new Outline(g, this.minimapRef.nativeElement);
+
+    // Accept shape drops from the palette
+    container.addEventListener('dragover', (e) => {
+      if (e.dataTransfer?.types.includes('application/shape')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    container.addEventListener('drop', (e) => {
+      const shape = e.dataTransfer?.getData('application/shape') as MermaidShape;
+      if (!shape) return;
+      e.preventDefault();
+      const pt = g.getPointForEvent(e);
+      const size = getDefaultSize(shape);
+      this.zone.run(() => this.addNode(shape, pt.x - size.width / 2, pt.y - size.height / 2));
+    });
+
+    // Setup pan and connect mode mouse handlers
+    this.setupModeHandlers(container);
   }
 
   /** Extract current graph state into IR and push to state service */
   private extractAndPushModel(): void {
-    const model = this.graph.getDataModel();
     const parent = this.graph.getDefaultParent();
     const newModel: FlowchartModel = {
       direction: this.state.model().direction,
       nodes: new Map(),
       edges: [],
+      subgraphs: this.state.model().subgraphs ?? [],
     };
 
     const childCount = parent.getChildCount();
@@ -468,6 +695,22 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       graphY: pt.y - 25,
       selectedCells,
     };
+  }
+
+  getRadialPosition(index: number): string {
+    const total = this.radialMenuItems.length;
+    const radius = 80;
+    const angle = (index / total) * 2 * Math.PI - Math.PI / 2;
+    const x = Math.cos(angle) * radius - 22;
+    const y = Math.sin(angle) * radius - 22;
+    return `translate(${x}px, ${y}px)`;
+  }
+
+  addFromRadial(shape: MermaidShape): void {
+    if (!this.radialMenu) return;
+    const size = getDefaultSize(shape);
+    this.addNode(shape, this.radialMenu.graphX - size.width / 2, this.radialMenu.graphY - size.height / 2);
+    this.radialMenu = null;
   }
 
   closeContextMenu(): void {
@@ -635,6 +878,247 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     };
     return `${labels[shape]} ${id}`;
   }
+
+  private applyMode(mode: string): void {
+    const g = this.graph;
+    if (!g) return;
+    const container = this.containerRef.nativeElement;
+
+    switch (mode) {
+      case 'pan':
+        g.setConnectable(false);
+        g.setCellsSelectable(false);
+        g.setCellsMovable(false);
+        container.style.cursor = 'grab';
+        break;
+      default: // 'select'
+        g.setConnectable(true);
+        g.setCellsSelectable(true);
+        g.setCellsMovable(true);
+        container.style.cursor = 'default';
+        break;
+    }
+  }
+
+  private setupModeHandlers(container: HTMLDivElement): void {
+    const onMouseDown = (e: MouseEvent) => {
+      // Middle-click pan (works in any mode)
+      if (e.button === 1) {
+        this.rubberband.setEnabled(false);
+        this.startPan(e, container);
+        this.isMiddleMousePan = true;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      if (e.button !== 0) return;
+
+      // Spacebar temporary pan (works in any mode)
+      if (this.isSpaceHeld) {
+        this.startPan(e, container);
+        e.stopPropagation();
+        e.preventDefault();
+        return;
+      }
+
+      const mode = this.state.canvasMode();
+      if (mode === 'pan') {
+        this.startPan(e, container);
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (this.isPanning) {
+        const dx = e.clientX - this.panStartX;
+        const dy = e.clientY - this.panStartY;
+        const scale = this.graph.getView().getScale();
+        this.graph.getView().setTranslate(
+          this.panStartTranslateX + dx / scale,
+          this.panStartTranslateY + dy / scale,
+        );
+        e.preventDefault();
+        return;
+      }
+
+      // Show port dots on hover
+      if (this.state.canvasMode() === 'select' && !this.graph.isEditing()) {
+        this.updatePortHover(e);
+      }
+    };
+
+    const onMouseUp = (_e: MouseEvent) => {
+      if (this.isPanning) {
+        this.isPanning = false;
+        if (this.isMiddleMousePan) {
+          this.isMiddleMousePan = false;
+          this.rubberband.setEnabled(true);
+        }
+        const currentMode = this.state.canvasMode();
+        if (this.isSpaceHeld) {
+          container.style.cursor = 'grab';
+        } else if (currentMode === 'pan') {
+          container.style.cursor = 'grab';
+        } else {
+          container.style.cursor = 'default';
+        }
+        return;
+      }
+    };
+
+    // Wheel: Ctrl/Cmd + wheel = zoom, plain wheel = pan
+    // Disable rubberband during wheel to prevent selection highlight
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      this.rubberband.setEnabled(false);
+      clearTimeout(this.wheelTimeout);
+      this.wheelTimeout = setTimeout(() => this.rubberband.setEnabled(true), 150);
+
+      if (e.ctrlKey || e.metaKey) {
+        const rect = container.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left;
+        const offsetY = e.clientY - rect.top;
+        this.zoomAtPoint(e.deltaY < 0, offsetX, offsetY);
+      } else {
+        const view = this.graph.getView();
+        const scale = view.getScale();
+        const translate = view.getTranslate();
+        view.setTranslate(
+          translate.x - e.deltaX / scale,
+          translate.y - e.deltaY / scale,
+        );
+      }
+    };
+
+    // Spacebar pan
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !this.isSpaceHeld && !this.graph.isEditing()) {
+        this.isSpaceHeld = true;
+        container.style.cursor = 'grab';
+        e.preventDefault();
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        this.isSpaceHeld = false;
+        if (!this.isPanning) {
+          const mode = this.state.canvasMode();
+          container.style.cursor = mode === 'pan' ? 'grab' : 'default';
+        }
+      }
+    };
+
+    container.addEventListener('mousedown', onMouseDown, true);
+    container.addEventListener('wheel', onWheel, { passive: false });
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    this.documentListeners.push(
+      () => document.removeEventListener('mousemove', onMouseMove),
+      () => document.removeEventListener('mouseup', onMouseUp),
+      () => document.removeEventListener('keydown', onKeyDown),
+      () => document.removeEventListener('keyup', onKeyUp),
+    );
+  }
+
+  private startPan(e: MouseEvent, container: HTMLDivElement): void {
+    this.isPanning = true;
+    this.panStartX = e.clientX;
+    this.panStartY = e.clientY;
+    const translate = this.graph.getView().getTranslate();
+    this.panStartTranslateX = translate.x;
+    this.panStartTranslateY = translate.y;
+    container.style.cursor = 'grabbing';
+  }
+
+  private zoomAtPoint(zoomIn: boolean, offsetX: number, offsetY: number): void {
+    const g = this.graph;
+    const view = g.getView();
+    const scale = view.getScale();
+    const factor = zoomIn ? 1.15 : 1 / 1.15;
+    const newScale = scale * factor;
+
+    const translate = view.getTranslate();
+    const dx = offsetX / scale - offsetX / newScale;
+    const dy = offsetY / scale - offsetY / newScale;
+
+    view.scaleAndTranslate(newScale, translate.x - dx, translate.y - dy);
+  }
+
+  // --- Port hover indicators (visual only, no click handling) ---
+
+  private updatePortHover(e: MouseEvent): void {
+    const container = this.containerRef.nativeElement;
+    const rect = container.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // If we already have a hovered cell, keep showing its ports until
+    // the mouse actually leaves its bounding box
+    if (this.hoveredCell) {
+      if (this.isInsideCellBounds(this.hoveredCell, mouseX, mouseY)) {
+        return;
+      }
+      // Mouse left the cell bounds — clear and check for new target
+      this.hoveredCell = null;
+      this.portOverlayRef.nativeElement.innerHTML = '';
+    }
+
+    const cell = this.graph.getCellAt(mouseX, mouseY);
+    const hoverTarget = cell?.isVertex() ? cell : null;
+
+    if (hoverTarget) {
+      this.hoveredCell = hoverTarget;
+      this.renderPorts(hoverTarget);
+    }
+  }
+
+  private isInsideCellBounds(cell: Cell, screenX: number, screenY: number): boolean {
+    const state = this.graph.getView().getState(cell);
+    if (!state) return false;
+
+    const padding = 8;
+    return screenX >= state.x - padding && screenX <= state.x + state.width + padding &&
+           screenY >= state.y - padding && screenY <= state.y + state.height + padding;
+  }
+
+  private renderPorts(cell: Cell | null): void {
+    const svg = this.portOverlayRef.nativeElement;
+    svg.innerHTML = '';
+    if (!cell) return;
+
+    const state = this.graph.getView().getState(cell);
+    if (!state) return;
+
+    const constraints = [
+      { px: 0.5, py: 0 },
+      { px: 1, py: 0.5 },
+      { px: 0.5, py: 1 },
+      { px: 0, py: 0.5 },
+    ];
+
+    for (const c of constraints) {
+      const x = state.x + state.width * c.px;
+      const y = state.y + state.height * c.py;
+
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', String(x));
+      circle.setAttribute('cy', String(y));
+      circle.setAttribute('r', '5');
+      circle.setAttribute('fill', '#555');
+      circle.setAttribute('stroke', '#fff');
+      circle.setAttribute('stroke-width', '1.5');
+      circle.setAttribute('opacity', '0.8');
+      svg.appendChild(circle);
+    }
+  }
+
 
   ngOnDestroy(): void {
     this.documentListeners.forEach(fn => fn());

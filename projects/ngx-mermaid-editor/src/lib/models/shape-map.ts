@@ -27,8 +27,8 @@ export const SHAPE_TO_STYLE: Record<MermaidShape, Partial<CellStyle>> = {
   subroutine:    { shape: 'rectangle', strokeWidth: 2 },
   asymmetric:    { shape: 'rectangle' },
   hexagon:       { shape: 'hexagon' },
-  cylinder:      { shape: 'cylinder3' },
-  trapezoid:     { shape: 'trapezoid', perimeter: 'trapezoidPerimeter' },
+  cylinder:      { shape: 'cylinder' },
+  trapezoid:     { shape: 'trapezoid' },
 };
 
 const BASE_STYLE: Partial<CellStyle> = {
@@ -52,7 +52,7 @@ export function styleToShape(style: CellStyle): MermaidShape {
   if (style.shape === 'ellipse') return 'circle';
   if (style.shape === 'parallelogram') return 'parallelogram';
   if (style.shape === 'hexagon') return 'hexagon';
-  if (style.shape === 'cylinder3') return 'cylinder';
+  if (style.shape === 'cylinder') return 'cylinder';
   if (style.shape === 'trapezoid') return 'trapezoid';
   if (style.rounded && (style.arcSize ?? 0) >= 50) return 'stadium';
   if (style.rounded) return 'rounded';
