@@ -8,12 +8,21 @@ import {
 export class MermaidDeserializerService {
 
   deserialize(text: string): FlowchartModel | null {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('%%'));
+    // Skip a leading YAML front-matter block (--- ... ---) before the diagram.
+    let source = text;
+    const frontMatter = source.match(/^﻿?[ \t]*---[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*---[ \t]*(?:\r?\n|$)/);
+    if (frontMatter) source = source.slice(frontMatter[0].length);
 
-    const dirMatch = lines[0]?.match(/^(?:flowchart|graph)\s+(TD|TB|LR|RL|BT)/i);
+    // %% comments and %%{init: ...}%% directives are dropped wherever they
+    // appear, including before the header line.
+    const lines = source.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('%%'));
+
+    // A header with no direction is valid Mermaid and defaults to TB (-> TD).
+    const dirMatch = lines[0]?.match(/^(?:flowchart|graph)(?:\s+(TD|TB|LR|RL|BT))?\s*;?\s*$/i);
     if (!dirMatch) return null;
 
-    const direction = (dirMatch[1].toUpperCase() === 'TB' ? 'TD' : dirMatch[1].toUpperCase()) as FlowDirection;
+    const rawDirection = (dirMatch[1] ?? 'TD').toUpperCase();
+    const direction = (rawDirection === 'TB' ? 'TD' : rawDirection) as FlowDirection;
     const model = createEmptyModel(direction);
 
     let edgeCounter = 0;
@@ -73,7 +82,9 @@ export class MermaidDeserializerService {
         continue;
       }
 
-      const bareId = line.match(/^\w+$/);
+      // Ids may contain '-' and '.', but only as single separators between
+      // word characters — runs like '--' stay reserved for edge connectors.
+      const bareId = line.match(/^\w+(?:[-.]\w+)*$/);
       if (bareId) {
         this.ensureNode(model, bareId[0]);
         this.trackNodeInSubgraph(subgraphStack, bareId[0]);
@@ -94,15 +105,31 @@ export class MermaidDeserializerService {
   }
 
   private parseSubgraphLine(text: string): { id: string; label: string } | null {
-    const match = text.match(/^subgraph\s+(\w+)\s*(?:\[([^\]]*)\])?\s*$/);
+    const match = text.match(/^subgraph\s+(.+?)\s*$/);
     if (!match) return null;
-    const id = match[1];
-    let label = match[2]?.trim() ?? id;
-    if ((label.startsWith('"') && label.endsWith('"')) ||
-        (label.startsWith("'") && label.endsWith("'"))) {
-      label = label.slice(1, -1);
+    const rest = match[1];
+
+    // Canonical `id[label]` form (the id may contain '-' and '.').
+    const idLabel = rest.match(/^(\w+(?:[-.]\w+)*)\s*\[([^\]]*)\]$/);
+    if (idLabel) {
+      const id = idLabel[1];
+      const label = this.stripQuotes(idLabel[2].trim());
+      return { id, label: label || id };
     }
-    return { id, label };
+
+    // Bare title: `subgraph sg1`, `subgraph "My Title"`, `subgraph My Title`.
+    // The title doubles as the id, matching Mermaid's behavior of keying the
+    // subgraph by its text when no explicit id is given.
+    const title = this.stripQuotes(rest);
+    return { id: title, label: title };
+  }
+
+  private stripQuotes(s: string): string {
+    if ((s.startsWith('"') && s.endsWith('"')) ||
+        (s.startsWith("'") && s.endsWith("'"))) {
+      return s.slice(1, -1);
+    }
+    return s;
   }
 
   private ensureNode(model: FlowchartModel, id: string, label?: string, shape?: MermaidShape): void {
@@ -116,7 +143,7 @@ export class MermaidDeserializerService {
   }
 
   private parseNodeDef(text: string): { id: string; label: string; shape: MermaidShape } | null {
-    const match = text.match(/^(\w+)\s*([\[\(\{<>].*)/);
+    const match = text.match(/^(\w+(?:[-.]\w+)*)\s*([\[\(\{<>].*)/);
     if (!match) return null;
 
     const id = match[1];
@@ -159,11 +186,22 @@ export class MermaidDeserializerService {
     targetId: string; targetLabel?: string; targetShape?: MermaidShape;
     label?: string; type: MermaidEdgeType;
   }> | null {
-    const edgeConnectors: Array<{ token: string; regex: RegExp; type: MermaidEdgeType }> = [
-      { token: '-.->', regex: /-\.->(?:\|([^|]*)\|)?/, type: 'dotted-arrow' },
-      { token: '==>',  regex: /==>(?:\|([^|]*)\|)?/,   type: 'thick-arrow' },
-      { token: '-->',  regex: /-->(?:\|([^|]*)\|)?/,    type: 'arrow' },
-      { token: '---',  regex: /---(?:\|([^|]*)\|)?/,    type: 'open' },
+    // Each connector regex accepts Mermaid's length variants (extra '-', '='
+    // or '.' characters only change the rendered edge length, never its type)
+    // plus the inline-label form (`A -- text --> B`). Group 1 captures a
+    // |pipe label|, group 2 an inline label; the 'd' flag exposes group
+    // indices so label text can be sliced from the unmasked line.
+    //
+    // TODO(roadmap): bidirectional (<-->, <-.->, <==>), circle/cross heads
+    // (--o, --x, o--o, x--x), invisible (~~~), dotted-open (-.-) and
+    // thick-open (===) links need new model fields; they are intentionally
+    // NOT coerced onto the four existing edge types (guarded by the
+    // lookarounds below so such lines keep their previous behavior).
+    const edgeConnectors: Array<{ regex: RegExp; type: MermaidEdgeType }> = [
+      { regex: /-\.+->(?:\|([^|]*)\|)?|(?<!-)-\.(?![.\-])((?:[^.]|\.(?!->))+?)\.->/d, type: 'dotted-arrow' },
+      { regex: /={2,}>(?:\|([^|]*)\|)?|(?<!=)==(?![=>])([^=]+?)==>/d, type: 'thick-arrow' },
+      { regex: /-{2,}>(?:\|([^|]*)\|)?|(?<!-)--(?![\->])((?:[^-]|-(?!->))+?)-->/d, type: 'arrow' },
+      { regex: /-{3,}(?![>.\-])(?:\|([^|]*)\|)?/d, type: 'open' },
     ];
 
     // Connectors and label delimiters are searched on a copy of the line with
@@ -171,8 +209,7 @@ export class MermaidDeserializerService {
     // never mistaken for edge syntax. Actual text is sliced from the original.
     const masked = this.maskQuotedContent(text);
 
-    const combinedPattern = /(?:-\.->(?:\|[^|]*\|)?|==>(?:\|[^|]*\|)?|-->(?:\|[^|]*\|)?|---(?:\|[^|]*\|)?)/;
-    if (!combinedPattern.test(masked)) return null;
+    if (!edgeConnectors.some(({ regex }) => regex.test(masked))) return null;
 
     const segments: string[] = [];
     const connectors: Array<{ type: MermaidEdgeType; label?: string }> = [];
@@ -182,16 +219,16 @@ export class MermaidDeserializerService {
     while (remaining.length > 0) {
       let earliest: { index: number; matchLen: number; type: MermaidEdgeType; label?: string } | null = null;
 
-      for (const { token, regex, type } of edgeConnectors) {
+      for (const { regex, type } of edgeConnectors) {
         const m = remainingMasked.match(regex);
         if (m && m.index !== undefined) {
           if (!earliest || m.index < earliest.index) {
             let edgeLabel: string | undefined;
-            if (m[1] !== undefined) {
-              // Take the label from the unmasked text (between the two pipes).
-              edgeLabel = remaining
-                .slice(m.index + token.length + 1, m.index + m[0].length - 1)
-                .trim();
+            const labelGroup = m[1] !== undefined ? 1 : m[2] !== undefined ? 2 : 0;
+            const span = labelGroup > 0 ? m.indices?.[labelGroup] : undefined;
+            if (span) {
+              // Take the label from the unmasked text at the group's position.
+              edgeLabel = remaining.slice(span[0], span[1]).trim();
               if (edgeLabel) {
                 if ((edgeLabel.startsWith('"') && edgeLabel.endsWith('"')) ||
                     (edgeLabel.startsWith("'") && edgeLabel.endsWith("'"))) {
@@ -221,6 +258,15 @@ export class MermaidDeserializerService {
 
     if (segments.length < 2 || connectors.length < 1) return null;
 
+    // Each segment may be an '&'-separated node list (`A & B --> C & D`);
+    // a connector between two lists expands to the cross-product of edges.
+    const segmentNodes: Array<Array<{ id: string; label?: string; shape?: MermaidShape }>> = [];
+    for (const segment of segments) {
+      const nodes = this.parseNodeList(segment);
+      if (!nodes) return null;
+      segmentNodes.push(nodes);
+    }
+
     const edges: Array<{
       sourceId: string; sourceLabel?: string; sourceShape?: MermaidShape;
       targetId: string; targetLabel?: string; targetShape?: MermaidShape;
@@ -228,19 +274,54 @@ export class MermaidDeserializerService {
     }> = [];
 
     for (let i = 0; i < connectors.length; i++) {
-      const src = this.parseInlineNode(segments[i]);
-      const tgt = this.parseInlineNode(segments[i + 1]);
-      if (!src || !tgt) return null;
-
-      edges.push({
-        sourceId: src.id, sourceLabel: src.label, sourceShape: src.shape,
-        targetId: tgt.id, targetLabel: tgt.label, targetShape: tgt.shape,
-        label: connectors[i].label,
-        type: connectors[i].type,
-      });
+      for (const src of segmentNodes[i]) {
+        for (const tgt of segmentNodes[i + 1]) {
+          edges.push({
+            sourceId: src.id, sourceLabel: src.label, sourceShape: src.shape,
+            targetId: tgt.id, targetLabel: tgt.label, targetShape: tgt.shape,
+            label: connectors[i].label,
+            type: connectors[i].type,
+          });
+        }
+      }
     }
 
     return edges;
+  }
+
+  /**
+   * Parses an edge-endpoint segment that may be an '&'-separated node list
+   * (`A & B[label]`). Splitting only happens at '&' characters outside quoted
+   * content and outside shape delimiters, so labels like `A["a & b"]` stay
+   * intact. Returns null if any list entry is not a parseable node.
+   */
+  private parseNodeList(text: string): Array<{ id: string; label?: string; shape?: MermaidShape }> | null {
+    const masked = this.maskQuotedContent(text);
+    const parts: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < masked.length; i++) {
+      const ch = masked[i];
+      if (ch === '[' || ch === '(' || ch === '{') {
+        depth++;
+      } else if (ch === ']' || ch === ')' || ch === '}') {
+        // Clamped so the asymmetric shape's unmatched ']' (opened by '>')
+        // cannot drive the depth negative.
+        depth = Math.max(0, depth - 1);
+      } else if (ch === '&' && depth === 0) {
+        parts.push(text.slice(start, i));
+        start = i + 1;
+      }
+    }
+    parts.push(text.slice(start));
+
+    const nodes: Array<{ id: string; label?: string; shape?: MermaidShape }> = [];
+    for (const part of parts) {
+      const parsed = this.parseInlineNode(part.trim());
+      if (!parsed) return null;
+      nodes.push(parsed);
+    }
+    return nodes;
   }
 
   /**
@@ -264,7 +345,7 @@ export class MermaidDeserializerService {
   }
 
   private parseInlineNode(text: string): { id: string; label?: string; shape?: MermaidShape } | null {
-    const idMatch = text.match(/^(\w+)/);
+    const idMatch = text.match(/^(\w+(?:[-.]\w+)*)/);
     if (!idMatch) return null;
 
     const id = idMatch[1];

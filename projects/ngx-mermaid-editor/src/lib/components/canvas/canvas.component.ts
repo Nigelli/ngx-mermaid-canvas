@@ -354,6 +354,23 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       ShapeRegistry.add('trapezoid', TrapezoidShape);
     }
 
+    // Register custom asymmetric (flag) shape: flat top/right/bottom with a
+    // notched left edge, matching Mermaid's `>label]` syntax.
+    if (!ShapeRegistry.get('asymmetric')) {
+      class AsymmetricShape extends HexagonShape {
+        override redrawPath(c: any, x: number, y: number, w: number, h: number): void {
+          this.addPoints(c, [
+            new Point(0, 0),
+            new Point(w, 0),
+            new Point(w, h),
+            new Point(0, h),
+            new Point(0.2 * w, 0.5 * h),
+          ], this.isRounded, this.getBaseArcSize(), true);
+        }
+      }
+      ShapeRegistry.add('asymmetric', AsymmetricShape);
+    }
+
     this.graph = new Graph(container);
     const g = this.graph;
 

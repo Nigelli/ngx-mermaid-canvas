@@ -26,7 +26,10 @@ export const SHAPE_TO_STYLE: Record<MermaidShape, Partial<CellStyle>> = {
   stadium:       { shape: 'rectangle', rounded: true, arcSize: 50 },
   parallelogram: { shape: 'parallelogram' },
   subroutine:    { shape: 'rectangle', strokeWidth: 2 },
-  asymmetric:    { shape: 'rectangle' },
+  // 'asymmetric' is a custom shape registered by the canvas component
+  // (mirroring 'trapezoid'); a distinct style key keeps the shape
+  // recoverable after canvas edits instead of collapsing to 'rectangle'.
+  asymmetric:    { shape: 'asymmetric' },
   hexagon:       { shape: 'hexagon' },
   cylinder:      { shape: 'cylinder' },
   trapezoid:     { shape: 'trapezoid' },
@@ -58,6 +61,7 @@ export function styleToShape(style: CellStyle): MermaidShape {
   if (style.shape === 'hexagon') return 'hexagon';
   if (style.shape === 'cylinder') return 'cylinder';
   if (style.shape === 'trapezoid') return 'trapezoid';
+  if (style.shape === 'asymmetric') return 'asymmetric';
   if (style.rounded && (style.arcSize ?? 0) >= 50) return 'stadium';
   if (style.rounded) return 'rounded';
   if ((style.strokeWidth ?? 1) > 1 && style.shape === 'rectangle') return 'subroutine';

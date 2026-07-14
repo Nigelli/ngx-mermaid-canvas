@@ -39,6 +39,28 @@ describe('MermaidDeserializerService', () => {
       expect(m.edges).toEqual([]);
       expect(m.subgraphs).toEqual([]);
     });
+
+    it('defaults to TD for a header with no direction', () => {
+      expect(service.deserialize('flowchart')!.direction).toBe('TD');
+      expect(service.deserialize('graph')!.direction).toBe('TD');
+      expect(service.deserialize('flowchart;')!.direction).toBe('TD');
+    });
+
+    it('skips a leading YAML front-matter block before the header', () => {
+      const m = service.deserialize(
+        '---\ntitle: My Diagram\nconfig:\n  theme: dark\n---\nflowchart LR\n    A --> B')!;
+      expect(m).not.toBeNull();
+      expect(m.direction).toBe('LR');
+      expect(m.nodes.size).toBe(2);
+    });
+
+    it('drops %% comments and %%{init}%% directives before the header', () => {
+      const m = service.deserialize(
+        '%% a leading comment\n%%{init: {"theme": "forest"}}%%\nflowchart TD\n    A --> B')!;
+      expect(m).not.toBeNull();
+      expect(m.direction).toBe('TD');
+      expect(m.nodes.size).toBe(2);
+    });
   });
 
   describe('node definitions and shapes', () => {
@@ -236,6 +258,195 @@ describe('MermaidDeserializerService', () => {
       const m = service.deserialize(
         'flowchart TD\n    subgraph sg1\n        A --> B\n        A --> C\n    end')!;
       expect(m.subgraphs[0].nodeIds).toEqual(['A', 'B', 'C']);
+    });
+
+    it('parses a quoted subgraph title', () => {
+      const m = service.deserialize(
+        'flowchart TD\n    subgraph "My Title"\n        A --> B\n    end\n    C')!;
+      expect(m.subgraphs.length).toBe(1);
+      expect(m.subgraphs[0].id).toBe('My Title');
+      expect(m.subgraphs[0].label).toBe('My Title');
+      expect(m.subgraphs[0].nodeIds).toEqual(['A', 'B']);
+      expect(m.nodes.size).toBe(3);
+    });
+
+    it('parses an unquoted subgraph title containing spaces', () => {
+      const m = service.deserialize(
+        'flowchart TD\n    subgraph My Fancy Group\n        A\n    end\n    B')!;
+      expect(m.subgraphs.length).toBe(1);
+      expect(m.subgraphs[0].label).toBe('My Fancy Group');
+      expect(m.subgraphs[0].nodeIds).toEqual(['A']);
+    });
+
+    it('does not let a spaced-title subgraph leak nodes or pop a parent scope', () => {
+      const m = service.deserialize(
+        'flowchart TD\n' +
+        '    subgraph outer\n' +
+        '        subgraph Inner Group\n' +
+        '            A\n' +
+        '        end\n' +
+        '        B\n' +
+        '    end\n')!;
+      const outer = m.subgraphs.find(s => s.id === 'outer')!;
+      const inner = m.subgraphs.find(s => s.label === 'Inner Group')!;
+      expect(inner.parentId).toBe('outer');
+      expect(inner.nodeIds).toEqual(['A']);
+      expect(outer.nodeIds).toEqual(['B']);
+    });
+  });
+
+  describe('edge length variants', () => {
+    it('normalizes longer solid arrows (--->, ---->) to arrow', () => {
+      const m = service.deserialize('flowchart TD\n    A ---> B\n    B ----> C')!;
+      expect(m.edges.map(e => [e.sourceId, e.targetId, e.type])).toEqual([
+        ['A', 'B', 'arrow'],
+        ['B', 'C', 'arrow'],
+      ]);
+      expect(m.nodes.size).toBe(3);
+    });
+
+    it('normalizes longer thick arrows (===>, ====>) to thick-arrow', () => {
+      const m = service.deserialize('flowchart TD\n    A ===> B\n    B ====> C')!;
+      expect(m.edges.map(e => e.type)).toEqual(['thick-arrow', 'thick-arrow']);
+    });
+
+    it('normalizes longer dotted arrows (-..->, -...->) to dotted-arrow', () => {
+      const m = service.deserialize('flowchart TD\n    A -..-> B\n    B -...-> C')!;
+      expect(m.edges.map(e => e.type)).toEqual(['dotted-arrow', 'dotted-arrow']);
+    });
+
+    it('normalizes longer open links (----, -----) to open', () => {
+      const m = service.deserialize('flowchart TD\n    A ---- B\n    B ----- C')!;
+      expect(m.edges.map(e => e.type)).toEqual(['open', 'open']);
+    });
+
+    it('parses pipe labels on length variants', () => {
+      const m = service.deserialize(
+        'flowchart TD\n    A --->|go| B\n    B ====>|fast| C\n    C ----|flat| D')!;
+      expect(m.edges.map(e => [e.type, e.label])).toEqual([
+        ['arrow', 'go'],
+        ['thick-arrow', 'fast'],
+        ['open', 'flat'],
+      ]);
+    });
+
+    it('parses length variants in chained edges', () => {
+      const m = service.deserialize('flowchart TD\n    A ---> B ==> C -..-> D')!;
+      expect(m.edges.map(e => [e.sourceId, e.targetId, e.type])).toEqual([
+        ['A', 'B', 'arrow'],
+        ['B', 'C', 'thick-arrow'],
+        ['C', 'D', 'dotted-arrow'],
+      ]);
+    });
+  });
+
+  describe('inline edge labels', () => {
+    it('parses A -- text --> B as an arrow with the label', () => {
+      const m = service.deserialize('flowchart TD\n    A -- text --> B')!;
+      expect(m.edges.length).toBe(1);
+      expect(m.edges[0]).toEqual(jasmine.objectContaining(
+        { sourceId: 'A', targetId: 'B', type: 'arrow', label: 'text' }));
+    });
+
+    it('parses A -. text .-> B as a dotted arrow with the label', () => {
+      const m = service.deserialize('flowchart TD\n    A -. text .-> B')!;
+      expect(m.edges.length).toBe(1);
+      expect(m.edges[0]).toEqual(jasmine.objectContaining(
+        { sourceId: 'A', targetId: 'B', type: 'dotted-arrow', label: 'text' }));
+    });
+
+    it('parses A == text ==> B as a thick arrow with the label', () => {
+      const m = service.deserialize('flowchart TD\n    A == text ==> B')!;
+      expect(m.edges.length).toBe(1);
+      expect(m.edges[0]).toEqual(jasmine.objectContaining(
+        { sourceId: 'A', targetId: 'B', type: 'thick-arrow', label: 'text' }));
+    });
+
+    it('parses inline labels written without surrounding spaces', () => {
+      const m = service.deserialize('flowchart TD\n    A--go-->B')!;
+      expect(m.edges[0]).toEqual(jasmine.objectContaining(
+        { sourceId: 'A', targetId: 'B', type: 'arrow', label: 'go' }));
+    });
+
+    it('keeps quoted inline labels with edge-connector text intact', () => {
+      const m = service.deserialize('flowchart TD\n    A -- "x --> y" --> B')!;
+      expect(m.edges.length).toBe(1);
+      expect(m.edges[0].label).toBe('x --> y');
+      expect(m.edges[0].targetId).toBe('B');
+    });
+
+    it('unescapes #quot; in inline labels', () => {
+      const m = service.deserialize('flowchart TD\n    A -- say #quot;hi#quot; --> B')!;
+      expect(m.edges[0].label).toBe('say "hi"');
+    });
+
+    it('parses inline node definitions around an inline-labeled edge', () => {
+      const m = service.deserialize('flowchart TD\n    A[Start] -- go --> B{Choice?}')!;
+      expect(m.nodes.get('A')).toEqual({ id: 'A', label: 'Start', shape: 'rectangle' });
+      expect(m.nodes.get('B')).toEqual({ id: 'B', label: 'Choice?', shape: 'diamond' });
+      expect(m.edges[0].label).toBe('go');
+    });
+  });
+
+  describe('& node lists', () => {
+    it('expands A & B --> C & D into the cross-product of edges', () => {
+      const m = service.deserialize('flowchart TD\n    A & B --> C & D')!;
+      expect(m.nodes.size).toBe(4);
+      expect(m.edges.map(e => [e.sourceId, e.targetId])).toEqual([
+        ['A', 'C'], ['A', 'D'], ['B', 'C'], ['B', 'D'],
+      ]);
+      expect(m.edges.every(e => e.type === 'arrow')).toBeTrue();
+      expect(m.edges.map(e => e.id)).toEqual(['e0', 'e1', 'e2', 'e3']);
+    });
+
+    it('applies the edge label and type to every expanded edge', () => {
+      const m = service.deserialize('flowchart TD\n    A & B -.->|both| C')!;
+      expect(m.edges.map(e => [e.sourceId, e.targetId, e.type, e.label])).toEqual([
+        ['A', 'C', 'dotted-arrow', 'both'],
+        ['B', 'C', 'dotted-arrow', 'both'],
+      ]);
+    });
+
+    it('parses inline node definitions inside a node list', () => {
+      const m = service.deserialize('flowchart TD\n    A[Start] & B(Other) --> C')!;
+      expect(m.nodes.get('A')).toEqual({ id: 'A', label: 'Start', shape: 'rectangle' });
+      expect(m.nodes.get('B')).toEqual({ id: 'B', label: 'Other', shape: 'rounded' });
+      expect(m.edges.length).toBe(2);
+    });
+
+    it('does not split on & inside a quoted node label', () => {
+      const m = service.deserialize('flowchart TD\n    A["a & b"] --> C')!;
+      expect(m.nodes.size).toBe(2);
+      expect(m.nodes.get('A')!.label).toBe('a & b');
+      expect(m.edges.length).toBe(1);
+    });
+  });
+
+  describe('lenient node ids', () => {
+    it('allows hyphens and dots in edge endpoint ids', () => {
+      const m = service.deserialize('flowchart TD\n    first-step --> v1.2')!;
+      expect(m.nodes.get('first-step')).toBeDefined();
+      expect(m.nodes.get('v1.2')).toBeDefined();
+      expect(m.edges[0]).toEqual(jasmine.objectContaining(
+        { sourceId: 'first-step', targetId: 'v1.2', type: 'arrow' }));
+    });
+
+    it('allows hyphens and dots in node definitions and bare declarations', () => {
+      const m = service.deserialize(
+        'flowchart TD\n    my-node[Label]\n    api.v2{"Check"}\n    plain-id')!;
+      expect(m.nodes.get('my-node')).toEqual(
+        { id: 'my-node', label: 'Label', shape: 'rectangle' });
+      expect(m.nodes.get('api.v2')).toEqual(
+        { id: 'api.v2', label: 'Check', shape: 'diamond' });
+      expect(m.nodes.get('plain-id')).toEqual(
+        { id: 'plain-id', label: 'plain-id', shape: 'rectangle' });
+    });
+
+    it('keeps hyphenated ids distinct from edge connectors', () => {
+      const m = service.deserialize('flowchart TD\n    a-b-->c-d')!;
+      expect(m.edges[0]).toEqual(jasmine.objectContaining(
+        { sourceId: 'a-b', targetId: 'c-d', type: 'arrow' }));
+      expect(m.nodes.size).toBe(2);
     });
   });
 });
