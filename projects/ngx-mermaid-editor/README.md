@@ -63,13 +63,14 @@ export class MyComponent {
 
 ### Inputs
 
-| Input            | Type            | Default | Description                          |
-| ---------------- | --------------- | ------- | ------------------------------------ |
-| `mermaidText`    | `string`        | `''`    | Initial Mermaid flowchart syntax     |
-| `direction`      | `FlowDirection` | `'TD'`  | Graph direction: `TD`, `LR`, `RL`, `BT` |
-| `showTextEditor` | `boolean`       | `true`  | Show the Mermaid text editor panel   |
-| `showPreview`    | `boolean`       | `true`  | Show the live Mermaid preview panel  |
-| `showPalette`    | `boolean`       | `true`  | Show the shape palette sidebar       |
+| Input            | Type                      | Default   | Description                          |
+| ---------------- | ------------------------- | --------- | ------------------------------------ |
+| `mermaidText`    | `string`                  | `''`      | Initial Mermaid flowchart syntax     |
+| `direction`      | `FlowDirection`           | `'TD'`    | Graph direction: `TD`, `LR`, `RL`, `BT` |
+| `showTextEditor` | `boolean`                 | `true`    | Show the Mermaid text editor panel   |
+| `showPreview`    | `boolean`                 | `true`    | Show the live Mermaid preview panel  |
+| `showPalette`    | `boolean`                 | `true`    | Show the shape palette sidebar       |
+| `theme`          | `NmcThemeName \| NmcTheme` | `'light'` | `'light'`, `'dark'`, or a custom palette — see [Theming](#theming) |
 
 ### Outputs
 
@@ -84,9 +85,89 @@ export class MyComponent {
 import type {
   FlowchartModel, FlowNode, FlowEdge, FlowSubgraph,
   FlowDirection, MermaidShape, MermaidEdgeType,
+  NmcTheme, NmcThemeName, ResolvedNmcTheme,
 } from 'ngx-mermaid-canvas';
 
-import { createEmptyModel, cloneModel } from 'ngx-mermaid-canvas';
+import { createEmptyModel, cloneModel, LIGHT_THEME, DARK_THEME, resolveTheme } from 'ngx-mermaid-canvas';
+```
+
+## Theming
+
+There are two rendering surfaces, themed by two complementary mechanisms:
+
+- **DOM chrome** (toolbar, palette, panels, menus) — styled with `--nmc-*` CSS
+  custom properties you can override from plain CSS.
+- **Diagram** (canvas nodes/edges rendered by maxGraph, plus the Mermaid
+  preview) — driven by the `theme` input.
+
+### Light / dark presets
+
+```html
+<ngx-mermaid-canvas theme="dark" />
+```
+
+The `theme` input switches everything at once: chrome CSS variables, canvas
+node/edge colors (existing cells recolor live), and the Mermaid preview theme.
+The default is `'light'`, which matches the library's original appearance.
+
+### Overriding the chrome with CSS variables
+
+All chrome colors and fonts are exposed as CSS custom properties, so you can
+re-skin the UI without touching the `theme` input:
+
+```css
+ngx-mermaid-canvas {
+  --nmc-accent: rebeccapurple;
+  --nmc-border: #d8cfe8;
+  --nmc-canvas-bg: #faf8ff;
+}
+```
+
+Main tokens (see the source of `MermaidEditorComponent` for the full list):
+
+| Token               | Purpose                                  |
+| ------------------- | ---------------------------------------- |
+| `--nmc-accent`      | Selection, hover, and active states      |
+| `--nmc-border`      | Panel borders and dividers               |
+| `--nmc-surface`     | Panel/menu/button backgrounds            |
+| `--nmc-canvas-bg`   | Canvas background                        |
+| `--nmc-canvas-grid` | Canvas grid dots                         |
+| `--nmc-text`        | Primary text                             |
+| `--nmc-muted`       | Secondary/label text                     |
+| `--nmc-danger`      | Destructive actions                      |
+| `--nmc-font`        | UI font family                           |
+| `--nmc-font-mono`   | Mermaid source editor font family        |
+| `--nmc-editor-bg`   | Mermaid source editor background         |
+
+CSS variables cannot reach the canvas cells (they are SVG styled by maxGraph
+at render time) — use the `theme` input for node/edge colors.
+
+### Custom themes
+
+Pass a partial `NmcTheme` object to override individual values. Unspecified
+fields fall back to the preset named by `base` (default `'light'`):
+
+```typescript
+import { NmcTheme } from 'ngx-mermaid-canvas';
+
+corporate: NmcTheme = {
+  base: 'dark',            // start from the dark preset
+  accent: '#e8a33d',
+  nodeFill: '#2b2b33',
+  nodeStroke: '#e8a33d',
+  edgeStroke: '#b8b8c8',
+  mermaidTheme: 'dark',    // any Mermaid theme name: default, dark, forest, neutral
+};
+```
+
+```html
+<ngx-mermaid-canvas [theme]="corporate" />
+```
+
+The presets and resolver are also exported:
+
+```typescript
+import { LIGHT_THEME, DARK_THEME, resolveTheme } from 'ngx-mermaid-canvas';
 ```
 
 ### Standalone services

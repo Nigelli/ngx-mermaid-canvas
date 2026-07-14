@@ -17,6 +17,10 @@ export type {
 } from './lib/models/graph-model';
 export { createEmptyModel, cloneModel } from './lib/models/graph-model';
 
+// Theming
+export type { NmcTheme, NmcThemeName, ResolvedNmcTheme } from './lib/models/theme';
+export { LIGHT_THEME, DARK_THEME, resolveTheme } from './lib/models/theme';
+
 // Services (for consumers who want standalone serialization)
 export { MermaidSerializerService } from './lib/services/mermaid-serializer.service';
 export { MermaidDeserializerService } from './lib/services/mermaid-deserializer.service';

@@ -55,8 +55,8 @@ import { MermaidShape } from '../../models/graph-model';
       flex-direction: column;
       gap: 2px;
       padding: 8px;
-      background: #fff;
-      border-right: 1px solid #e0e0e0;
+      background: var(--nmc-surface, #fff);
+      border-right: 1px solid var(--nmc-border, #e0e0e0);
       width: 80px;
       min-width: 80px;
       overflow-y: auto;
@@ -65,7 +65,7 @@ import { MermaidShape } from '../../models/graph-model';
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
-      color: #888;
+      color: var(--nmc-muted, #888);
       padding: 4px 0;
       letter-spacing: 0.5px;
     }
@@ -79,13 +79,13 @@ import { MermaidShape } from '../../models/graph-model';
       border-radius: 4px;
       background: none;
       cursor: pointer;
-      color: #555;
+      color: var(--nmc-icon, #555);
       transition: all 0.15s;
     }
     .palette-item:hover {
-      background: #f0f4ff;
-      border-color: #c0d0f0;
-      color: #333;
+      background: var(--nmc-accent-soft, #f0f4ff);
+      border-color: var(--nmc-accent-border, #c0d0f0);
+      color: var(--nmc-text, #333);
     }
     .shape-icon {
       width: 36px;

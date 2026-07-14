@@ -38,43 +38,43 @@ import { GraphStateService } from '../../services/graph-state.service';
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
-      color: #888;
+      color: var(--nmc-muted, #888);
       padding: 6px 10px;
-      background: #fafafa;
-      border-bottom: 1px solid #e0e0e0;
+      background: var(--nmc-surface-muted, #fafafa);
+      border-bottom: 1px solid var(--nmc-border, #e0e0e0);
       letter-spacing: 0.5px;
     }
     .copy-btn {
       font-size: 10px;
       padding: 2px 8px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--nmc-border-strong, #ccc);
       border-radius: 3px;
-      background: #fff;
+      background: var(--nmc-surface, #fff);
       cursor: pointer;
-      color: #666;
+      color: var(--nmc-text-secondary, #666);
       text-transform: none;
       letter-spacing: 0;
       transition: all 0.15s;
     }
     .copy-btn:hover {
-      background: #f0f4ff;
-      border-color: #aac;
+      background: var(--nmc-accent-soft, #f0f4ff);
+      border-color: var(--nmc-accent-border, #aac);
     }
     .text-editor {
       flex: 1;
-      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      font-family: var(--nmc-font-mono, 'JetBrains Mono', 'Fira Code', 'Consolas', monospace);
       font-size: 13px;
       line-height: 1.5;
       padding: 12px;
       border: none;
       outline: none;
       resize: none;
-      background: #1e1e2e;
-      color: #cdd6f4;
+      background: var(--nmc-editor-bg, #1e1e2e);
+      color: var(--nmc-editor-text, #cdd6f4);
       tab-size: 4;
     }
     .text-editor::selection {
-      background: #45475a;
+      background: var(--nmc-editor-selection, #45475a);
     }
   `],
 })

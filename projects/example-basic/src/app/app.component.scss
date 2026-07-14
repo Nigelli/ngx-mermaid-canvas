@@ -3,6 +3,10 @@
   flex-direction: column;
   height: 100vh;
   background: #f5f5f5;
+
+  &.dark {
+    background: #0d0d14;
+  }
 }
 
 .app-header {
@@ -22,6 +26,25 @@
   .subtitle {
     font-size: 12px;
     color: #a0a0c0;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .theme-toggle {
+    align-self: center;
+    padding: 4px 12px;
+    font-size: 12px;
+    border: 1px solid #4a4a6a;
+    border-radius: 4px;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+
+    &:hover {
+      background: #2a2a44;
+    }
   }
 }
 

@@ -11,6 +11,7 @@ import { LayoutService } from '../../services/layout.service';
 import { FlowchartModel, FlowNode, FlowEdge, MermaidShape, MermaidEdgeType } from '../../models/graph-model';
 import { getVertexStyle, styleToShape, getDefaultSize } from '../../models/shape-map';
 import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
+import { ResolvedNmcTheme } from '../../models/theme';
 
 @Component({
   selector: 'lib-canvas',
@@ -79,8 +80,8 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       overflow: hidden;
       cursor: default;
       position: relative;
-      background-color: #f8f9fa;
-      background-image: radial-gradient(circle, #d0d0d0 1px, transparent 1px);
+      background-color: var(--nmc-canvas-bg, #f8f9fa);
+      background-image: radial-gradient(circle, var(--nmc-canvas-grid, #d0d0d0) 1px, transparent 1px);
       background-size: 20px 20px;
       user-select: none;
     }
@@ -96,11 +97,12 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
     }
     /* maxGraph inline cell editor — make it visible with a clear border */
     :host ::ng-deep .mxCellEditor {
-      background: #fff !important;
-      border: 2px solid #4a90d9 !important;
+      background: var(--nmc-surface, #fff) !important;
+      border: 2px solid var(--nmc-accent, #4a90d9) !important;
       border-radius: 3px;
       padding: 2px 4px !important;
-      font-family: Inter, system-ui, sans-serif;
+      color: var(--nmc-text, #333);
+      font-family: var(--nmc-font, Inter, system-ui, sans-serif);
       font-size: 13px;
       outline: none;
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
@@ -109,8 +111,8 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
     /* Rubberband (drag-to-select) rectangle */
     :host ::ng-deep .mxRubberband {
       position: absolute;
-      background: rgba(74, 144, 217, 0.12);
-      border: 1.5px solid rgba(74, 144, 217, 0.6);
+      background: var(--nmc-rubberband-bg, rgba(74, 144, 217, 0.12));
+      border: 1.5px solid var(--nmc-rubberband-border, rgba(74, 144, 217, 0.6));
       border-radius: 2px;
       pointer-events: none;
     }
@@ -120,9 +122,9 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       right: 8px;
       width: 150px;
       height: 110px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--nmc-border-strong, #ccc);
       border-radius: 4px;
-      background: #fff;
+      background: var(--nmc-surface, #fff);
       opacity: 0.85;
       overflow: hidden;
       z-index: 10;
@@ -138,8 +140,8 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       width: 44px;
       height: 44px;
       border-radius: 8px;
-      border: 1px solid #d0d0d0;
-      background: #fff;
+      border: 1px solid var(--nmc-popover-border, #d0d0d0);
+      background: var(--nmc-surface, #fff);
       cursor: pointer;
       display: flex;
       flex-direction: column;
@@ -148,12 +150,12 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       gap: 1px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.12);
       transition: background 0.12s;
-      color: #444;
+      color: var(--nmc-icon, #444);
       padding: 2px;
     }
     .radial-item:hover {
-      background: #f0f4ff;
-      border-color: #999;
+      background: var(--nmc-accent-soft, #f0f4ff);
+      border-color: var(--nmc-popover-border-hover, #999);
     }
     .radial-icon {
       width: 20px;
@@ -162,14 +164,14 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
     .radial-label {
       font-size: 7px;
       line-height: 1;
-      color: #666;
+      color: var(--nmc-text-secondary, #666);
       white-space: nowrap;
     }
     .context-menu {
       position: absolute;
       z-index: 1000;
-      background: #fff;
-      border: 1px solid #d0d0d0;
+      background: var(--nmc-surface, #fff);
+      border: 1px solid var(--nmc-popover-border, #d0d0d0);
       border-radius: 6px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       padding: 4px 0;
@@ -184,14 +186,14 @@ import { getEdgeStyle, styleToEdgeType } from '../../models/edge-map';
       border: none;
       background: none;
       cursor: pointer;
-      color: #333;
+      color: var(--nmc-text, #333);
     }
-    .ctx-item:hover { background: #f0f4ff; }
-    .ctx-item.danger { color: #c33; }
-    .ctx-item.danger:hover { background: #fff0f0; }
+    .ctx-item:hover { background: var(--nmc-accent-soft, #f0f4ff); }
+    .ctx-item.danger { color: var(--nmc-danger, #c33); }
+    .ctx-item.danger:hover { background: var(--nmc-danger-soft, #fff0f0); }
     .ctx-divider {
       height: 1px;
-      background: #e8e8e8;
+      background: var(--nmc-popover-divider, #e8e8e8);
       margin: 4px 0;
     }
   `],
@@ -204,6 +206,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   private graph!: Graph;
   private undoManager!: UndoManager;
   private suppressEvents = false;
+  private suppressUndo = false;
   contextMenu: { x: number; y: number; cell: Cell | null; isEdge: boolean; graphX: number; graphY: number; selectedCells: Cell[] } | null = null;
   radialMenu: { x: number; y: number; graphX: number; graphY: number } | null = null;
 
@@ -264,6 +267,16 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       effect(() => {
         const mode = this.state.canvasMode();
         this.zone.runOutsideAngular(() => this.applyMode(mode));
+      });
+
+      // React to theme changes — recolor existing cells in place
+      let lastTheme = this.state.theme();
+      effect(() => {
+        const theme = this.state.theme();
+        if (theme !== lastTheme) {
+          lastTheme = theme;
+          this.zone.runOutsideAngular(() => this.applyThemeToCells(theme));
+        }
       });
 
       // React to disabled state
@@ -402,6 +415,8 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     // Setup undo manager
     this.undoManager = new UndoManager();
     const listener = (_sender: any, evt: EventObject) => {
+      // Theme restyles are cosmetic — keep them out of the undo history
+      if (this.suppressUndo) return;
       this.undoManager.undoableEditHappened(evt.getProperty('edit'));
     };
     g.getDataModel().addListener(InternalEvent.UNDO, listener);
@@ -505,11 +520,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       };
     }
 
-    // Set default edge style
+    // Set default edge style (colors come from the active theme)
+    const theme = this.state.theme();
     const defaultEdgeStyle = g.getStylesheet().getDefaultEdgeStyle();
     defaultEdgeStyle.endArrow = 'classic';
-    defaultEdgeStyle.strokeColor = '#666666';
-    defaultEdgeStyle.fontColor = '#666666';
+    defaultEdgeStyle.strokeColor = theme.edgeStroke;
+    defaultEdgeStyle.fontColor = theme.edgeFontColor;
     defaultEdgeStyle.fontSize = 11;
     defaultEdgeStyle.rounded = true;
     defaultEdgeStyle.endFill = true;
@@ -610,12 +626,13 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     g.refresh();
 
     // Now insert fresh cells
+    const theme = this.state.theme();
     g.getDataModel().beginUpdate();
     try {
       const cellMap = new Map<string, Cell>();
 
       for (const node of model.nodes.values()) {
-        const style = getVertexStyle(node.shape);
+        const style = getVertexStyle(node.shape, theme);
         const size = getDefaultSize(node.shape);
         const v = g.insertVertex(
           parent, node.id, node.label,
@@ -630,7 +647,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
         const src = cellMap.get(edge.sourceId);
         const tgt = cellMap.get(edge.targetId);
         if (src && tgt) {
-          const style = getEdgeStyle(edge.type);
+          const style = getEdgeStyle(edge.type, theme);
           g.insertEdge(parent, edge.id, edge.label ?? '', src, tgt, style);
         }
       }
@@ -646,7 +663,7 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     const id = this.state.generateNodeId();
     const label = this.defaultLabel(shape, id);
     const size = getDefaultSize(shape);
-    const style = getVertexStyle(shape);
+    const style = getVertexStyle(shape, this.state.theme());
 
     this.graph.batchUpdate(() => {
       this.graph.insertVertex(
@@ -808,12 +825,47 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     const cells = this.graph.getSelectionCells().filter(c => c.isEdge());
     if (cells.length === 0) return;
 
-    const style = getEdgeStyle(type);
+    const style = getEdgeStyle(type, this.state.theme());
     this.graph.batchUpdate(() => {
       for (const cell of cells) {
         this.graph.setCellStyle(style, [cell]);
       }
     });
+  }
+
+  /**
+   * Re-derive every cell's style from its structural shape/edge type using
+   * the given theme. Colors don't affect the IR, so model extraction and
+   * undo bookkeeping are suppressed while restyling.
+   */
+  private applyThemeToCells(theme: ResolvedNmcTheme): void {
+    const g = this.graph;
+    if (!g) return;
+
+    // Update the stylesheet default so interactively-drawn edges recolor too
+    const defaultEdgeStyle = g.getStylesheet().getDefaultEdgeStyle();
+    defaultEdgeStyle.strokeColor = theme.edgeStroke;
+    defaultEdgeStyle.fontColor = theme.edgeFontColor;
+
+    this.suppressEvents = true;
+    this.suppressUndo = true;
+    try {
+      g.batchUpdate(() => {
+        const children = g.getDefaultParent().getChildren() ?? [];
+        for (const cell of children) {
+          const style = cell.getStyle() as CellStyle;
+          if (cell.isVertex()) {
+            g.setCellStyle(getVertexStyle(styleToShape(style), theme), [cell]);
+          } else if (cell.isEdge()) {
+            g.setCellStyle(getEdgeStyle(styleToEdgeType(style), theme), [cell]);
+          }
+        }
+      });
+    } finally {
+      this.suppressEvents = false;
+      this.suppressUndo = false;
+    }
+    g.refresh();
   }
 
   undo(): void {
@@ -1111,8 +1163,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       circle.setAttribute('cx', String(x));
       circle.setAttribute('cy', String(y));
       circle.setAttribute('r', '5');
-      circle.setAttribute('fill', '#555');
-      circle.setAttribute('stroke', '#fff');
+      // Inline style (not attributes) so the theme CSS variables resolve
+      circle.style.fill = 'var(--nmc-port-fill, #555)';
+      circle.style.stroke = 'var(--nmc-port-stroke, #fff)';
       circle.setAttribute('stroke-width', '1.5');
       circle.setAttribute('opacity', '0.8');
       svg.appendChild(circle);

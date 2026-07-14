@@ -1,5 +1,6 @@
 import { Injectable, signal, computed, WritableSignal } from '@angular/core';
 import { FlowchartModel, FlowDirection, createEmptyModel, MermaidEdgeType, cloneModel } from '../models/graph-model';
+import { LIGHT_THEME, ResolvedNmcTheme } from '../models/theme';
 import { MermaidSerializerService } from './mermaid-serializer.service';
 import { MermaidDeserializerService } from './mermaid-deserializer.service';
 import { LayoutService } from './layout.service';
@@ -32,6 +33,9 @@ export class GraphStateService {
 
   /** When true, all interaction is disabled */
   readonly disabled: WritableSignal<boolean> = signal(false);
+
+  /** Active (fully resolved) theme — set by the root editor component */
+  readonly theme: WritableSignal<ResolvedNmcTheme> = signal(LIGHT_THEME);
 
   private nodeCounter = 0;
 

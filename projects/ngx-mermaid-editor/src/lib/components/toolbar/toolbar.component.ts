@@ -88,8 +88,8 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
       align-items: center;
       gap: 4px;
       padding: 6px 12px;
-      background: #fff;
-      border-bottom: 1px solid #e0e0e0;
+      background: var(--nmc-surface, #fff);
+      border-bottom: 1px solid var(--nmc-border, #e0e0e0);
       flex-shrink: 0;
     }
     .toolbar-group {
@@ -99,32 +99,34 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
     }
     .toolbar-label {
       font-size: 11px;
-      color: #666;
+      color: var(--nmc-text-secondary, #666);
       margin-right: 4px;
     }
     .toolbar-select {
       font-size: 12px;
       padding: 3px 6px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--nmc-border-strong, #ccc);
       border-radius: 4px;
-      background: #fff;
+      background: var(--nmc-surface, #fff);
+      color: var(--nmc-text, inherit);
     }
     .toolbar-btn {
       padding: 4px 10px;
       font-size: 12px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--nmc-border-strong, #ccc);
       border-radius: 4px;
-      background: #fff;
+      background: var(--nmc-surface, #fff);
+      color: var(--nmc-text, inherit);
       cursor: pointer;
       transition: background 0.15s;
     }
     .toolbar-btn:hover {
-      background: #f0f4ff;
+      background: var(--nmc-accent-soft, #f0f4ff);
     }
     .toolbar-btn.danger:hover {
-      background: #fff0f0;
-      border-color: #e0a0a0;
-      color: #c33;
+      background: var(--nmc-danger-soft, #fff0f0);
+      border-color: var(--nmc-danger-border, #e0a0a0);
+      color: var(--nmc-danger, #c33);
     }
     .toolbar-spacer {
       flex: 1;
@@ -132,13 +134,13 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
     .toolbar-divider {
       width: 1px;
       height: 20px;
-      background: #e0e0e0;
+      background: var(--nmc-border, #e0e0e0);
       margin: 0 4px;
     }
     .mode-btn.active {
-      background: #e3edff;
-      border-color: #4a90d9;
-      color: #2a6ab8;
+      background: var(--nmc-accent-active, #e3edff);
+      border-color: var(--nmc-accent, #4a90d9);
+      color: var(--nmc-accent-strong, #2a6ab8);
     }
     kbd {
       display: inline-block;
@@ -146,10 +148,10 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
       font-family: inherit;
       padding: 1px 4px;
       margin-left: 4px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--nmc-border-strong, #ccc);
       border-radius: 3px;
-      background: #f5f5f5;
-      color: #666;
+      background: var(--nmc-kbd-bg, #f5f5f5);
+      color: var(--nmc-text-secondary, #666);
       line-height: 1;
     }
   `],

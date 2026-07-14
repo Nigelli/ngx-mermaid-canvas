@@ -1,5 +1,6 @@
 import { type CellStyle } from '@maxgraph/core';
 import { MermaidShape } from './graph-model';
+import { LIGHT_THEME, ResolvedNmcTheme } from './theme';
 
 /** Mermaid shape syntax wrappers: [open, close] */
 export const MERMAID_SHAPE_SYNTAX: Record<MermaidShape, [string, string]> = {
@@ -31,19 +32,22 @@ export const SHAPE_TO_STYLE: Record<MermaidShape, Partial<CellStyle>> = {
   trapezoid:     { shape: 'trapezoid' },
 };
 
-const BASE_STYLE: Partial<CellStyle> = {
-  fillColor: '#ffffff',
-  strokeColor: '#333333',
-  fontColor: '#333333',
-  fontSize: 13,
-  fontFamily: 'Inter, system-ui, sans-serif',
-  whiteSpace: 'wrap',
-  overflow: 'hidden',
-  autoSize: false,
-};
+/** Base vertex style with colors/fonts drawn from the active theme */
+function getBaseStyle(theme: ResolvedNmcTheme): Partial<CellStyle> {
+  return {
+    fillColor: theme.nodeFill,
+    strokeColor: theme.nodeStroke,
+    fontColor: theme.nodeFontColor,
+    fontSize: 13,
+    fontFamily: theme.font,
+    whiteSpace: 'wrap',
+    overflow: 'hidden',
+    autoSize: false,
+  };
+}
 
-export function getVertexStyle(shape: MermaidShape): Partial<CellStyle> {
-  return { ...BASE_STYLE, ...SHAPE_TO_STYLE[shape] };
+export function getVertexStyle(shape: MermaidShape, theme: ResolvedNmcTheme = LIGHT_THEME): Partial<CellStyle> {
+  return { ...getBaseStyle(theme), ...SHAPE_TO_STYLE[shape] };
 }
 
 /** Given a maxGraph CellStyle, determine the MermaidShape */

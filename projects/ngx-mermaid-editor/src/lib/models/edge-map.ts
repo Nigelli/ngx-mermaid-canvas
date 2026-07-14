@@ -1,5 +1,6 @@
 import { type CellStyle } from '@maxgraph/core';
 import { MermaidEdgeType } from './graph-model';
+import { LIGHT_THEME, ResolvedNmcTheme } from './theme';
 
 /** Mermaid edge syntax: [connector, arrowSuffix] */
 export const MERMAID_EDGE_SYNTAX: Record<MermaidEdgeType, string> = {
@@ -9,24 +10,28 @@ export const MERMAID_EDGE_SYNTAX: Record<MermaidEdgeType, string> = {
   'thick-arrow':  '==>',
 };
 
-const BASE_EDGE_STYLE: Partial<CellStyle> = {
-  strokeColor: '#666666',
-  fontColor: '#666666',
-  fontSize: 11,
-  fontFamily: 'Inter, system-ui, sans-serif',
-  endFill: true,
-  rounded: true,
-};
+/** Base edge style with colors/fonts drawn from the active theme */
+function getBaseEdgeStyle(theme: ResolvedNmcTheme): Partial<CellStyle> {
+  return {
+    strokeColor: theme.edgeStroke,
+    fontColor: theme.edgeFontColor,
+    fontSize: 11,
+    fontFamily: theme.font,
+    endFill: true,
+    rounded: true,
+  };
+}
 
+/** Structural (theme-independent) style overrides per edge type */
 export const EDGE_TYPE_STYLES: Record<MermaidEdgeType, Partial<CellStyle>> = {
-  arrow:          { ...BASE_EDGE_STYLE, endArrow: 'classic' },
-  open:           { ...BASE_EDGE_STYLE, endArrow: 'none' },
-  'dotted-arrow': { ...BASE_EDGE_STYLE, endArrow: 'classic', dashed: true },
-  'thick-arrow':  { ...BASE_EDGE_STYLE, endArrow: 'classic', strokeWidth: 3 },
+  arrow:          { endArrow: 'classic' },
+  open:           { endArrow: 'none' },
+  'dotted-arrow': { endArrow: 'classic', dashed: true },
+  'thick-arrow':  { endArrow: 'classic', strokeWidth: 3 },
 };
 
-export function getEdgeStyle(type: MermaidEdgeType): Partial<CellStyle> {
-  return EDGE_TYPE_STYLES[type];
+export function getEdgeStyle(type: MermaidEdgeType, theme: ResolvedNmcTheme = LIGHT_THEME): Partial<CellStyle> {
+  return { ...getBaseEdgeStyle(theme), ...EDGE_TYPE_STYLES[type] };
 }
 
 export function styleToEdgeType(style: CellStyle): MermaidEdgeType {
