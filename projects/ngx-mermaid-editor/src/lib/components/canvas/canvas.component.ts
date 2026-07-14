@@ -305,6 +305,15 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     //    so menu clicks never reach this listener — no filtering needed.
     // 2) Capture-phase on document — catches clicks outside the component entirely
     //    (toolbar, text editor, preview). Must check target isn't inside the menu.
+    //
+    // These must listen to `pointerdown`, not `mousedown`: on non-Mac platforms
+    // maxGraph binds its gesture handlers to pointer events (Client.IS_POINTER)
+    // and calls preventDefault() on `pointerdown` for canvas/cell clicks, which
+    // suppresses the browser's compatibility `mousedown` entirely — a mousedown
+    // listener would never fire there. `pointerdown` always dispatches (before
+    // mousedown) and preventDefault() cannot stop its propagation, so capture
+    // listeners on it fire reliably on every platform.
+    const dismissEvent = window.PointerEvent ? 'pointerdown' : 'mousedown';
     const dismissMenus = () => {
       if (this.contextMenu || this.radialMenu) {
         this.contextMenu = null;
@@ -312,9 +321,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
         this.cdr.detectChanges();
       }
     };
-    container.addEventListener('mousedown', dismissMenus, true);
+    container.addEventListener(dismissEvent, dismissMenus, true);
 
-    const dismissIfOutsideMenu = (e: MouseEvent) => {
+    const dismissIfOutsideMenu = (e: Event) => {
       const target = e.target as HTMLElement;
       if (this.contextMenu && !target.closest('.context-menu')) {
         this.contextMenu = null;
@@ -325,9 +334,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
         this.cdr.detectChanges();
       }
     };
-    document.addEventListener('mousedown', dismissIfOutsideMenu, true);
+    document.addEventListener(dismissEvent, dismissIfOutsideMenu, true);
     this.documentListeners.push(
-      () => document.removeEventListener('mousedown', dismissIfOutsideMenu, true),
+      () => document.removeEventListener(dismissEvent, dismissIfOutsideMenu, true),
     );
 
     // Register custom trapezoid shape
@@ -953,6 +962,18 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
   }
 
   private setupModeHandlers(container: HTMLDivElement): void {
+    // Pan start/move/end must listen to pointer events on platforms where
+    // maxGraph binds its gesture handlers to pointer events (Client.IS_POINTER,
+    // i.e. non-Mac). There maxGraph calls preventDefault() on `pointerdown` for
+    // canvas/cell clicks, which suppresses the browser's compatibility
+    // `mousedown`/`mousemove`/`mouseup` — so mouse-event pan listeners never
+    // receive their start event. PointerEvent exposes the same `.button`
+    // (0 = left, 1 = middle) and `.clientX/.clientY`, so the logic ports directly.
+    // Fall back to mouse events on browsers without PointerEvent.
+    const panStart = window.PointerEvent ? 'pointerdown' : 'mousedown';
+    const panMove = window.PointerEvent ? 'pointermove' : 'mousemove';
+    const panEnd = window.PointerEvent ? 'pointerup' : 'mouseup';
+
     const onMouseDown = (e: MouseEvent) => {
       // Middle-click pan (works in any mode)
       if (e.button === 1) {
@@ -1065,15 +1086,15 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       }
     };
 
-    container.addEventListener('mousedown', onMouseDown, true);
+    container.addEventListener(panStart, onMouseDown as EventListener, true);
     container.addEventListener('wheel', onWheel, { passive: false });
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener(panMove, onMouseMove as EventListener);
+    document.addEventListener(panEnd, onMouseUp as EventListener);
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
     this.documentListeners.push(
-      () => document.removeEventListener('mousemove', onMouseMove),
-      () => document.removeEventListener('mouseup', onMouseUp),
+      () => document.removeEventListener(panMove, onMouseMove as EventListener),
+      () => document.removeEventListener(panEnd, onMouseUp as EventListener),
       () => document.removeEventListener('keydown', onKeyDown),
       () => document.removeEventListener('keyup', onKeyUp),
     );
