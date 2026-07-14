@@ -45,6 +45,12 @@
     &:hover {
       background: #2a2a44;
     }
+
+    &.active {
+      background: #3a3a5c;
+      border-color: #6a6a9a;
+      font-weight: 600;
+    }
   }
 }
 

@@ -10,7 +10,7 @@ import { PreviewComponent } from './preview/preview.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { GraphStateService } from '../services/graph-state.service';
 import { FlowchartModel, FlowDirection, MermaidShape, MermaidEdgeType } from '../models/graph-model';
-import { NmcTheme, NmcThemeName, resolveTheme } from '../models/theme';
+import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/theme';
 
 @Component({
   selector: 'ngx-mermaid-canvas',
@@ -68,14 +68,8 @@ import { NmcTheme, NmcThemeName, resolveTheme } from '../models/theme';
     '[attr.data-theme]': 'resolvedTheme().base',
     // Explicit fields from a custom NmcTheme object override the preset's
     // CSS variables (inline styles win over the :host blocks below).
-    '[style.--nmc-accent]': 'themeVar("accent")',
-    '[style.--nmc-border]': 'themeVar("border")',
-    '[style.--nmc-surface]': 'themeVar("surface")',
-    '[style.--nmc-canvas-bg]': 'themeVar("canvasBg")',
-    '[style.--nmc-text]': 'themeVar("text")',
-    '[style.--nmc-muted]': 'themeVar("muted")',
-    '[style.--nmc-font]': 'themeVar("font")',
-    '[style.--nmc-font-mono]': 'themeVar("fontMono")',
+    // Unset fields are omitted, so the data-theme preset block applies.
+    '[style]': 'themeStyles()',
   },
   styles: [`
     :host {
@@ -248,14 +242,23 @@ export class MermaidEditorComponent implements OnInit, AfterViewInit {
   }
 
   /**
-   * Returns an explicitly-set value from a custom theme object for host
-   * style binding, or null so the preset's CSS variable block applies.
+   * Inline `--nmc-*` custom properties for the host, built only from fields
+   * explicitly set on a custom NmcTheme object. Preset (string) themes and
+   * unset fields contribute nothing, so the `:host` / `data-theme` CSS blocks
+   * apply. Inline styles win, so a custom object can override any token.
    */
-  protected themeVar(key: keyof NmcTheme): string | null {
+  protected readonly themeStyles = computed<Record<string, string>>(() => {
     const theme = this.theme();
-    if (typeof theme === 'string') return null;
-    return (theme[key] as string | undefined) ?? null;
-  }
+    if (typeof theme === 'string') return {};
+    const styles: Record<string, string> = {};
+    for (const [field, cssVar] of Object.entries(NMC_CSS_VARS)) {
+      const value = (theme as NmcTheme)[field as keyof NmcTheme];
+      if (value !== undefined && cssVar) {
+        styles[cssVar] = value as string;
+      }
+    }
+    return styles;
+  });
 
   ngAfterViewInit(): void {
     runInInjectionContext(this.injector, () => {

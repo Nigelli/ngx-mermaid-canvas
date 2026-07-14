@@ -22,6 +22,7 @@ A visual flowchart editor for Angular that outputs [Mermaid](https://mermaid.js.
 - Undo/redo, copy/paste, keyboard shortcuts
 - Shape palette, context menus, minimap
 - Configurable panels — show/hide text editor, preview, and palette independently
+- Light/dark presets plus fully customizable theming — every token overridable via a `theme` object or `--nmc-*` CSS variables ([Theming](#theming))
 
 ## Installation
 
@@ -93,12 +94,12 @@ import { createEmptyModel, cloneModel, LIGHT_THEME, DARK_THEME, resolveTheme } f
 
 ## Theming
 
-There are two rendering surfaces, themed by two complementary mechanisms:
-
-- **DOM chrome** (toolbar, palette, panels, menus) — styled with `--nmc-*` CSS
-  custom properties you can override from plain CSS.
-- **Diagram** (canvas nodes/edges rendered by maxGraph, plus the Mermaid
-  preview) — driven by the `theme` input.
+**The `theme` input is the primary, recommended way to theme the editor.** It
+covers everything — chrome, canvas nodes/edges, and the Mermaid preview — and a
+custom `NmcTheme` object can override every token (see [Custom themes](#custom-themes)).
+CSS custom properties are also exposed as an escape hatch for global re-skinning
+(see [CSS variables](#overriding-the-chrome-with-css-variables)), with one
+caveat noted there.
 
 ### Light / dark presets
 
@@ -106,30 +107,39 @@ There are two rendering surfaces, themed by two complementary mechanisms:
 <ngx-mermaid-canvas theme="dark" />
 ```
 
-The `theme` input switches everything at once: chrome CSS variables, canvas
+The `theme` input switches everything at once: chrome colors, canvas
 node/edge colors (existing cells recolor live), and the Mermaid preview theme.
 The default is `'light'`, which matches the library's original appearance.
 
 ### Overriding the chrome with CSS variables
 
-All chrome colors and fonts are exposed as CSS custom properties, so you can
-re-skin the UI without touching the `theme` input:
+All chrome colors and fonts are also exposed as `--nmc-*` CSS custom properties.
+Because the preset defaults are declared on the component's `:host` (which
+Angular emulates as an attribute selector), a plain element-selector rule is
+**out-specified by the preset** and won't apply. Add `!important` so your
+override wins in both light and dark:
 
 ```css
 ngx-mermaid-canvas {
-  --nmc-accent: rebeccapurple;
-  --nmc-border: #d8cfe8;
-  --nmc-canvas-bg: #faf8ff;
+  --nmc-accent: rebeccapurple !important;
+  --nmc-border: #d8cfe8 !important;
+  --nmc-canvas-bg: #faf8ff !important;
 }
 ```
 
-Main tokens (see the source of `MermaidEditorComponent` for the full list):
+No `::ng-deep` or `ViewEncapsulation` change is needed — custom properties
+inherit through emulated encapsulation; the `!important` is only there to beat
+the preset's specificity. For per-instance theming without `!important`, prefer
+the `theme` input, whose values are applied inline and always win.
+
+Common tokens:
 
 | Token               | Purpose                                  |
 | ------------------- | ---------------------------------------- |
 | `--nmc-accent`      | Selection, hover, and active states      |
 | `--nmc-border`      | Panel borders and dividers               |
 | `--nmc-surface`     | Panel/menu/button backgrounds            |
+| `--nmc-surface-muted` | Panel headers (source/preview titles)  |
 | `--nmc-canvas-bg`   | Canvas background                        |
 | `--nmc-canvas-grid` | Canvas grid dots                         |
 | `--nmc-text`        | Primary text                             |
@@ -139,13 +149,22 @@ Main tokens (see the source of `MermaidEditorComponent` for the full list):
 | `--nmc-font-mono`   | Mermaid source editor font family        |
 | `--nmc-editor-bg`   | Mermaid source editor background         |
 
+The complete set is the [`NmcTheme`](#custom-themes) field list — every field
+maps to a variable by the same rule: **camelCase field → `--nmc-` + kebab-case**
+(e.g. `accentSoft` → `--nmc-accent-soft`, `editorText` → `--nmc-editor-text`).
+
 CSS variables cannot reach the canvas cells (they are SVG styled by maxGraph
 at render time) — use the `theme` input for node/edge colors.
 
 ### Custom themes
 
 Pass a partial `NmcTheme` object to override individual values. Unspecified
-fields fall back to the preset named by `base` (default `'light'`):
+fields fall back to the preset named by `base` (default `'light'`). **Every
+chrome token is exposed as a field**, so a custom object alone can theme the
+whole editor — nothing needs to fall back to raw CSS. Each field maps to the
+matching `--nmc-*` variable (e.g. `surfaceMuted` → `--nmc-surface-muted`); the
+canvas `node*`/`edge*` colors and `mermaidTheme` drive the SVG surfaces that
+CSS can't reach.
 
 ```typescript
 import { NmcTheme } from 'ngx-mermaid-canvas';
@@ -153,16 +172,43 @@ import { NmcTheme } from 'ngx-mermaid-canvas';
 corporate: NmcTheme = {
   base: 'dark',            // start from the dark preset
   accent: '#e8a33d',
+  surface: '#1b1b22',
+  surfaceMuted: '#141419', // panel headers ("Mermaid Source" / "Preview")
+  editorBg: '#0f0f14',     // source editor background
   nodeFill: '#2b2b33',
   nodeStroke: '#e8a33d',
   edgeStroke: '#b8b8c8',
-  mermaidTheme: 'dark',    // any Mermaid theme name: default, dark, forest, neutral
+  mermaidTheme: 'base',    // 'base' matches the preview to the palette above;
+                          // or a Mermaid theme name: default, dark, forest, neutral
 };
 ```
+
+> **Matching the live preview to your palette:** set `mermaidTheme: 'base'`.
+> The preview then derives Mermaid `themeVariables` (node fill/border/text,
+> line color, background, fonts) from the `node*`/`edge*`/`surface`/`font`
+> fields, so the rendered diagram matches the canvas. Any other name
+> (`'default'`, `'dark'`, `'forest'`, `'neutral'`) uses that built-in Mermaid
+> theme as-is and ignores the palette.
+
+See the `NmcTheme` interface for the full field list (accent family, surfaces,
+borders, text, danger, source editor, popovers, ports, rubberband, errors,
+fonts, and canvas node/edge colors).
 
 ```html
 <ngx-mermaid-canvas [theme]="corporate" />
 ```
+
+**Precedence** (highest first) for a given token:
+
+1. `--nmc-*` in your CSS with `!important`
+2. a field on the `theme` object (applied inline on the host)
+3. the active preset default (`base`, declared on `:host`)
+4. a plain `--nmc-*` CSS rule *without* `!important` — **out-specified by the
+   preset, so it does not apply** (see [CSS variables](#overriding-the-chrome-with-css-variables))
+
+In practice: use the `theme` object/input for per-instance theming (no
+`!important` needed), and reserve CSS variables for global overrides where you
+add `!important`.
 
 The presets and resolver are also exported:
 

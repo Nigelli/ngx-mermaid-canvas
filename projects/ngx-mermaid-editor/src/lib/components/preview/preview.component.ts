@@ -5,6 +5,7 @@ import {
 } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
 import { GraphStateService } from '../../services/graph-state.service';
+import { ResolvedNmcTheme } from '../../models/theme';
 
 @Component({
   selector: 'lib-preview',
@@ -69,34 +70,68 @@ export class PreviewComponent implements AfterViewInit {
   private mermaidModule: any = null;
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
   private initialized = false;
-  private appliedMermaidTheme: string | null = null;
+  private appliedThemeKey: string | null = null;
 
   async ngAfterViewInit(): Promise<void> {
     this.mermaidModule = await import('mermaid');
-    this.initializeMermaid(this.state.theme().mermaidTheme);
+    this.initializeMermaid(this.state.theme());
     this.initialized = true;
 
     runInInjectionContext(this.injector, () => {
       effect(() => {
         const text = this.state.mermaidText();
-        const mermaidTheme = this.state.theme().mermaidTheme;
+        const theme = this.state.theme();
         // Mermaid's theme is fixed at initialize time — re-initialize and
-        // re-render when the active theme changes.
-        if (mermaidTheme !== this.appliedMermaidTheme) {
-          this.initializeMermaid(mermaidTheme);
+        // re-render when the active theme (name or derived palette) changes.
+        if (this.themeKey(theme) !== this.appliedThemeKey) {
+          this.initializeMermaid(theme);
         }
         this.scheduleRender(text);
       });
     });
   }
 
-  private initializeMermaid(theme: string): void {
-    this.appliedMermaidTheme = theme;
+  private initializeMermaid(theme: ResolvedNmcTheme): void {
+    this.appliedThemeKey = this.themeKey(theme);
+    // A 'base' mermaidTheme means "match the editor palette" — derive Mermaid
+    // themeVariables from the resolved theme (themeVariables only apply with
+    // the 'base' theme). Any other name is used as-is (default, dark, forest…).
+    const useBase = theme.mermaidTheme === 'base';
     this.mermaidModule.default.initialize({
       startOnLoad: false,
-      theme,
+      theme: theme.mermaidTheme,
       securityLevel: 'strict',
+      ...(useBase ? { themeVariables: this.buildThemeVariables(theme) } : {}),
     });
+  }
+
+  /** Map the editor palette onto Mermaid 'base' theme variables. */
+  private buildThemeVariables(t: ResolvedNmcTheme): Record<string, string> {
+    return {
+      background: t.surface,
+      primaryColor: t.nodeFill,
+      mainBkg: t.nodeFill,
+      primaryBorderColor: t.nodeStroke,
+      nodeBorder: t.nodeStroke,
+      primaryTextColor: t.nodeFontColor,
+      textColor: t.text,
+      titleColor: t.text,
+      lineColor: t.edgeStroke,
+      edgeLabelBackground: t.surface,
+      secondaryColor: t.surfaceMuted,
+      tertiaryColor: t.surfaceMuted,
+      clusterBkg: t.surfaceMuted,
+      clusterBorder: t.border,
+      fontFamily: t.font,
+    };
+  }
+
+  /** Distinct key for the palette inputs that affect Mermaid rendering. */
+  private themeKey(t: ResolvedNmcTheme): string {
+    return [
+      t.mermaidTheme, t.surface, t.surfaceMuted, t.border, t.text,
+      t.nodeFill, t.nodeStroke, t.nodeFontColor, t.edgeStroke, t.font,
+    ].join('|');
   }
 
   private scheduleRender(text: string): void {
