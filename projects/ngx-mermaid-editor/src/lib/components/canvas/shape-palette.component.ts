@@ -42,6 +42,17 @@ import { MermaidShape } from '../../models/graph-model';
               @case ('trapezoid') {
                 <polygon points="8,4 32,4 38,26 2,26" fill="none" stroke="currentColor" stroke-width="1.5"/>
               }
+              @case ('parallelogram') {
+                <polygon points="10,4 38,4 30,26 2,26" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              }
+              @case ('subroutine') {
+                <rect x="4" y="4" width="32" height="22" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <line x1="9" y1="4" x2="9" y2="26" stroke="currentColor" stroke-width="1"/>
+                <line x1="31" y1="4" x2="31" y2="26" stroke="currentColor" stroke-width="1"/>
+              }
+              @case ('asymmetric') {
+                <polygon points="4,4 36,4 36,26 4,26 10,15" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              }
             }
           </svg>
           <span class="palette-label">{{ opt.label }}</span>
@@ -116,5 +127,8 @@ export class ShapePaletteComponent {
     { shape: 'hexagon', label: 'Prepare' },
     { shape: 'cylinder', label: 'Database' },
     { shape: 'trapezoid', label: 'Manual' },
+    { shape: 'parallelogram', label: 'I/O' },
+    { shape: 'subroutine', label: 'Subroutine' },
+    { shape: 'asymmetric', label: 'Flag' },
   ];
 }

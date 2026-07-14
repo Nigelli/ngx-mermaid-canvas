@@ -1,6 +1,6 @@
 {
   "name": "ngx-mermaid-canvas",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "A visual drag-and-drop flowchart editor for Angular that reads and writes Mermaid syntax.",
   "author": "Nigel Anderson",
   "license": "MIT",

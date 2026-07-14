@@ -4,7 +4,7 @@ import {
 } from '@angular/core';
 import {
   Graph, InternalEvent, UndoManager, RubberBandHandler, KeyHandler, Cell, CellStyle,
-  ConnectionConstraint, Outline, type EventObject, Point, HexagonShape, ShapeRegistry,
+  ConnectionConstraint, Outline, type EventObject, Point, HexagonShape, RectangleShape, ShapeRegistry,
 } from '@maxgraph/core';
 import { GraphStateService } from '../../services/graph-state.service';
 import { LayoutService } from '../../services/layout.service';
@@ -39,6 +39,9 @@ import { ResolvedNmcTheme } from '../../models/theme';
                 @case ('hexagon') { <polygon points="8,1 24,1 31,12 24,23 8,23 1,12" fill="none" stroke="currentColor" stroke-width="1.5"/> }
                 @case ('cylinder') { <path d="M6,6 Q16,2 26,6 L26,18 Q16,22 6,18 Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6,6 Q16,10 26,6" fill="none" stroke="currentColor" stroke-width="1"/> }
                 @case ('trapezoid') { <polygon points="6,2 26,2 30,22 2,22" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('parallelogram') { <polygon points="8,2 30,2 24,22 2,22" fill="none" stroke="currentColor" stroke-width="1.5"/> }
+                @case ('subroutine') { <rect x="2" y="2" width="28" height="20" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="6" y1="2" x2="6" y2="22" stroke="currentColor" stroke-width="1"/><line x1="26" y1="2" x2="26" y2="22" stroke="currentColor" stroke-width="1"/> }
+                @case ('asymmetric') { <polygon points="2,2 30,2 30,22 2,22 8,12" fill="none" stroke="currentColor" stroke-width="1.5"/> }
               }
             </svg>
             <span class="radial-label">{{ item.label }}</span>
@@ -219,6 +222,9 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     { shape: 'hexagon', label: 'Prepare' },
     { shape: 'cylinder', label: 'Database' },
     { shape: 'trapezoid', label: 'Manual' },
+    { shape: 'parallelogram', label: 'I/O' },
+    { shape: 'subroutine', label: 'Subroutine' },
+    { shape: 'asymmetric', label: 'Flag' },
   ];
   clipboardCells: Cell[] = [];
   private documentListeners: Array<() => void> = [];
@@ -371,6 +377,46 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       ShapeRegistry.add('asymmetric', AsymmetricShape);
     }
 
+    // Register custom parallelogram (I/O) shape: a right-leaning slanted
+    // rectangle matching Mermaid's `[/label/]` syntax. maxGraph has no
+    // built-in 'parallelogram', so without this it falls back to a rectangle.
+    if (!ShapeRegistry.get('parallelogram')) {
+      class ParallelogramShape extends HexagonShape {
+        override redrawPath(c: any, x: number, y: number, w: number, h: number): void {
+          this.addPoints(c, [
+            new Point(0.2 * w, 0),
+            new Point(w, 0),
+            new Point(0.8 * w, h),
+            new Point(0, h),
+          ], this.isRounded, this.getBaseArcSize(), true);
+        }
+      }
+      ShapeRegistry.add('parallelogram', ParallelogramShape);
+    }
+
+    // Register custom subroutine (predefined process) shape: a rectangle with
+    // an inner vertical bar near each side edge, matching Mermaid's
+    // `[[label]]` syntax.
+    if (!ShapeRegistry.get('subroutine')) {
+      class SubroutineShape extends RectangleShape {
+        // Force SVG rendering so paintForeground (the inner bars) always runs.
+        override isHtmlAllowed(): boolean {
+          return false;
+        }
+        override paintForeground(c: any, x: number, y: number, w: number, h: number): void {
+          super.paintForeground(c, x, y, w, h);
+          const inset = Math.min(10, 0.15 * w);
+          c.begin();
+          c.moveTo(x + inset, y);
+          c.lineTo(x + inset, y + h);
+          c.moveTo(x + w - inset, y);
+          c.lineTo(x + w - inset, y + h);
+          c.stroke();
+        }
+      }
+      ShapeRegistry.add('subroutine', SubroutineShape);
+    }
+
     this.graph = new Graph(container);
     const g = this.graph;
 
@@ -456,6 +502,12 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
 
     // Track selection changes for contextual toolbar
     g.getSelectionModel().addListener(InternalEvent.CHANGE, () => {
+      // A newly-selected cell is in resize/move mode — hide its port dots
+      // immediately instead of waiting for the next mouse-move
+      if (this.hoveredCell && !this.shouldShowPortsFor(this.hoveredCell)) {
+        this.hoveredCell = null;
+        this.portOverlayRef.nativeElement.innerHTML = '';
+      }
       this.zone.run(() => this.updateSelectionState());
     });
 
@@ -530,10 +582,13 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
       const origIsStartEvent = connectionHandler.isStartEvent.bind(connectionHandler);
       connectionHandler.isStartEvent = (me: any) => {
         if (!origIsStartEvent(me)) return false;
+        const state = connectionHandler.previous;
+        // Never start a connector from a selected cell — it's in resize/move
+        // mode and its resize handles own the pointer (draw.io behaviour)
+        if (state?.cell && g.isCellSelected(state.cell)) return false;
         // If we have a constraint point, we're on the border — allow it
         if (connectionHandler.constraintHandler?.currentConstraint) return true;
         // Otherwise check if mouse is near the edge of the cell
-        const state = connectionHandler.previous;
         if (!state) return false;
         const x = me.getGraphX();
         const y = me.getGraphY();
@@ -1150,23 +1205,35 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     const mouseY = e.clientY - rect.top;
 
     // If we already have a hovered cell, keep showing its ports until
-    // the mouse actually leaves its bounding box
+    // the mouse actually leaves its bounding box (or the cell gets selected)
     if (this.hoveredCell) {
-      if (this.isInsideCellBounds(this.hoveredCell, mouseX, mouseY)) {
+      if (this.shouldShowPortsFor(this.hoveredCell) &&
+          this.isInsideCellBounds(this.hoveredCell, mouseX, mouseY)) {
         return;
       }
-      // Mouse left the cell bounds — clear and check for new target
+      // Mouse left the cell bounds (or cell became selected) — clear and
+      // check for a new target
       this.hoveredCell = null;
       this.portOverlayRef.nativeElement.innerHTML = '';
     }
 
     const cell = this.graph.getCellAt(mouseX, mouseY);
-    const hoverTarget = cell?.isVertex() ? cell : null;
+    const hoverTarget = this.shouldShowPortsFor(cell) ? cell : null;
 
     if (hoverTarget) {
       this.hoveredCell = hoverTarget;
       this.renderPorts(hoverTarget);
     }
+  }
+
+  /**
+   * Connector ports are only offered on vertices that are NOT selected:
+   * a selected vertex is in resize/move mode and its resize handles own
+   * the pointer (draw.io behaviour). Deselect (click empty canvas) to
+   * draw an edge from it.
+   */
+  private shouldShowPortsFor(cell: Cell | null): boolean {
+    return !!cell && cell.isVertex() && !this.graph.isCellSelected(cell);
   }
 
   private isInsideCellBounds(cell: Cell, screenX: number, screenY: number): boolean {

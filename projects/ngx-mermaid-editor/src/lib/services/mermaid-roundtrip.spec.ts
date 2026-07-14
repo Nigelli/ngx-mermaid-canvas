@@ -193,6 +193,34 @@ describe('Mermaid round-trip (serialize <-> deserialize)', () => {
     expect(deserializer.deserialize(text)!.nodes.get('A')!.shape).toBe('asymmetric');
   });
 
+  it('gives parallelogram and subroutine dedicated canvas shape keys (no strokeWidth heuristic)', () => {
+    // Both resolve to custom shapes registered by the canvas component, so
+    // the canvas renders them distinctly instead of falling back to a plain
+    // rectangle (subroutine previously relied on a strokeWidth > 1 heuristic).
+    const parallelogram = getVertexStyle('parallelogram') as CellStyle;
+    expect(parallelogram.shape).toBe('parallelogram');
+    expect(styleToShape(parallelogram)).toBe('parallelogram');
+
+    const subroutine = getVertexStyle('subroutine') as CellStyle;
+    expect(subroutine.shape).toBe('subroutine');
+    expect(subroutine.strokeWidth).toBeUndefined();
+    expect(styleToShape(subroutine)).toBe('subroutine');
+
+    // A thick-stroked rectangle is just a rectangle now, not a subroutine.
+    expect(styleToShape({ shape: 'rectangle', strokeWidth: 2 } as CellStyle)).toBe('rectangle');
+
+    // And both survive serialize -> deserialize with their Mermaid wrappers.
+    const text = serializer.serialize(buildModel({
+      nodes: [{ id: 'A', label: 'In', shape: 'parallelogram' },
+              { id: 'B', label: 'Sub', shape: 'subroutine' }],
+    }));
+    expect(text).toContain('A[/"In"/]');
+    expect(text).toContain('B[["Sub"]]');
+    const back = deserializer.deserialize(text)!;
+    expect(back.nodes.get('A')!.shape).toBe('parallelogram');
+    expect(back.nodes.get('B')!.shape).toBe('subroutine');
+  });
+
   it('canvas style round-trip preserves every shape (styleToShape ∘ getVertexStyle)', () => {
     const shapes: FlowNode['shape'][] = [
       'rectangle', 'rounded', 'diamond', 'circle', 'stadium', 'parallelogram',

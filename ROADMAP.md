@@ -39,8 +39,8 @@ this is about exposing it on the canvas.
 
 | # | Item | Surfaces | Effort | Notes |
 |---|---|---|---|---|
-| 1.1 | Add the 3 unexposed shapes (parallelogram, subroutine, asymmetric) to the palette, radial menu, and context menu with SVG icons | C | S | Model + both text directions already work; pure UI wiring |
-| 1.2 | Proper visuals for `parallelogram` (register a custom maxGraph shape like `trapezoid`) and `subroutine` (double side-bars instead of a strokeWidth heuristic) | C | S | Makes reverse shape-detection robust too |
+| 1.1 ✅ | Add the 3 unexposed shapes (parallelogram, subroutine, asymmetric) to the palette, radial menu, and context menu with SVG icons | C | S | **Done (0.2.3)** — added to the palette and radial menu. Context menu intentionally left as its curated Process/Decision/Start-End quick-add (the other advanced shapes aren't there either); revisit if a full shape picker is wanted there. |
+| 1.2 ✅ | Proper visuals for `parallelogram` (register a custom maxGraph shape like `trapezoid`) and `subroutine` (double side-bars instead of a strokeWidth heuristic) | C | S | **Done (0.2.3)** — custom `ParallelogramShape` + `SubroutineShape`; strokeWidth heuristic removed from reverse shape-detection. |
 
 ## Tier 2 — High-value flowchart features
 
@@ -80,7 +80,7 @@ works for free. Suggested order by demand and structural reuse:
 
 ## Suggested sequencing
 
-1. **Tier 1** — cheap palette/fidelity wins, ship alongside the correctness fixes.
+1. ✅ **Tier 1** — cheap palette/fidelity wins, shipped alongside the correctness fixes (0.2.3).
 2. **2.3 Lossless statement preservation** — do this early; it makes every later feature safe to ship incrementally.
 3. **2.1 Edge types → 2.2 Shapes → 2.4 Styling → 2.5 Canvas subgraphs.**
 4. **Tier 3** as capacity allows.
