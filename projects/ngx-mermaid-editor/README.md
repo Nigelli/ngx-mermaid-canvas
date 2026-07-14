@@ -1,5 +1,11 @@
 # ngx-mermaid-canvas
 
+[![npm version](https://img.shields.io/npm/v/ngx-mermaid-canvas.svg)](https://www.npmjs.com/package/ngx-mermaid-canvas)
+[![Live demo](https://img.shields.io/badge/demo-live-2ea44f.svg)](https://nigelli.github.io/ngx-mermaid-canvas/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Nigelli/ngx-mermaid-canvas/blob/main/LICENSE)
+
+**▶ [Try the live demo](https://nigelli.github.io/ngx-mermaid-canvas/)** — the editor running in your browser.
+
 > **Early-stage project** — this library is under active development and is not yet production-ready. APIs may change without notice. Contributions, ideas, and bug reports are very welcome, but please be aware that responses and reviews may be slow. If you're happy to experiment and help shape the direction, pull up a chair!
 
 A visual flowchart editor for Angular that outputs [Mermaid](https://mermaid.js.org/) syntax. Drag, drop, and connect nodes on a canvas — get valid Mermaid code out the other side.
