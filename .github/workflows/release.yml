@@ -33,7 +33,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          # Node 22.x: current npm (>= 12) requires Node >= 22, and the
+          # OIDC Trusted Publishing upgrade step below pulls npm@latest.
+          node-version: 22.x
           cache: npm
           # Points the publish at the public npm registry (and writes the
           # .npmrc that the OIDC flow uses).
