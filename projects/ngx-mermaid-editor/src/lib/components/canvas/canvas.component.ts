@@ -17,7 +17,7 @@ import { ResolvedNmcTheme } from '../../models/theme';
   selector: 'lib-canvas',
   standalone: true,
   template: `
-    <div #graphContainer class="graph-container" (contextmenu)="onContextMenu($event)"></div>
+    <div #graphContainer class="graph-container" tabindex="0" (contextmenu)="onContextMenu($event)"></div>
     <svg #portOverlay class="port-overlay"></svg>
     <div #minimapContainer class="minimap"></div>
     @if (radialMenu) {
@@ -87,6 +87,7 @@ import { ResolvedNmcTheme } from '../../models/theme';
       background-image: radial-gradient(circle, var(--nmc-canvas-grid, #d0d0d0) 1px, transparent 1px);
       background-size: 20px 20px;
       user-select: none;
+      outline: none;
     }
     .port-overlay {
       position: absolute;
@@ -1162,13 +1163,13 @@ export class CanvasComponent implements AfterViewInit, OnDestroy {
     container.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener(panMove, onMouseMove as EventListener);
     document.addEventListener(panEnd, onMouseUp as EventListener);
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('keyup', onKeyUp);
+    container.addEventListener('keydown', onKeyDown);
+    container.addEventListener('keyup', onKeyUp);
     this.documentListeners.push(
       () => document.removeEventListener(panMove, onMouseMove as EventListener),
       () => document.removeEventListener(panEnd, onMouseUp as EventListener),
-      () => document.removeEventListener('keydown', onKeyDown),
-      () => document.removeEventListener('keyup', onKeyUp),
+      () => container.removeEventListener('keydown', onKeyDown),
+      () => container.removeEventListener('keyup', onKeyUp),
     );
   }
 
