@@ -55,13 +55,14 @@ export class GraphStateService {
 
   /** Called when the text editor content changes */
   updateFromText(text: string): void {
-    const parsed = this.deserializer.deserialize(text);
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const parsed = this.deserializer.deserialize(normalized);
     if (!parsed) return;
 
     this.changeSource.set('text');
     const laid = this.layout.applyLayout(parsed);
     this.model.set(laid);
-    this.mermaidText.set(text);
+    this.mermaidText.set(normalized);
     // Bump version so the canvas effect knows to sync
     this.textVersion.update(v => v + 1);
     queueMicrotask(() => this.changeSource.set('none'));
