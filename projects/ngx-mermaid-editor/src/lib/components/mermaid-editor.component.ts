@@ -1,7 +1,7 @@
 import {
   Component, input, output, effect, inject, OnInit, ViewChild,
   ChangeDetectionStrategy, Injector, runInInjectionContext, AfterViewInit,
-  ElementRef, signal, computed,
+  ElementRef, signal, computed, HostListener,
 } from '@angular/core';
 import { CanvasComponent } from './canvas/canvas.component';
 import { ShapePaletteComponent } from './canvas/shape-palette.component';
@@ -28,6 +28,8 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
     <div class="editor-root" [class.disabled]="disabled()">
       @if (!disabled()) {
         <lib-toolbar
+          [editorVisible]="canvasVisible()"
+          [isFullscreen]="previewFullscreen()"
           (undoClicked)="canvasRef?.undo()"
           (redoClicked)="canvasRef?.redo()"
           (deleteClicked)="canvasRef?.deleteSelected()"
@@ -36,28 +38,37 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
           (zoomInClicked)="canvasRef?.zoomIn()"
           (zoomOutClicked)="canvasRef?.zoomOut()"
           (edgeTypeChanged)="canvasRef?.setEdgeType($event)"
+          (toggleEditorClicked)="canvasVisible.set(!canvasVisible())"
+          (fullscreenClicked)="previewFullscreen.set(!previewFullscreen())"
         />
       }
 
       <div class="editor-body">
-        <div class="left-pane" [style.flex]="leftFlex()">
-          @if (showPalette() && !disabled()) {
-            <lib-shape-palette (shapeSelected)="onShapeSelected($event)" />
+        @if (canvasVisible()) {
+          <div class="left-pane" [style.flex]="leftFlex()">
+            @if (showPalette() && !disabled()) {
+              <lib-shape-palette (shapeSelected)="onShapeSelected($event)" />
+            }
+            <lib-canvas #canvas />
+          </div>
+
+          @if ((showTextEditor() || showPreview()) && !disabled()) {
+            <div
+              class="split-handle"
+              (mousedown)="onSplitDragStart($event)"
+            ></div>
           }
-          <lib-canvas #canvas />
-        </div>
+        }
 
         @if ((showTextEditor() || showPreview()) && !disabled()) {
-          <div
-            class="split-handle"
-            (mousedown)="onSplitDragStart($event)"
-          ></div>
-          <div class="right-pane" [style.flex]="rightFlex()">
+          <div class="right-pane" [style.flex]="canvasVisible() ? rightFlex() : '1'">
             @if (showTextEditor()) {
               <lib-text-editor />
             }
             @if (showPreview()) {
-              <lib-preview />
+              <div [class.preview-fullscreen]="previewFullscreen()">
+                <lib-preview />
+              </div>
             }
           </div>
         }
@@ -138,6 +149,16 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
       pointer-events: none;
       user-select: none;
     }
+    .preview-fullscreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: var(--nmc-surface, #fff);
+    }
+    .preview-fullscreen lib-preview {
+      height: 100%;
+      display: block;
+    }
     .editor-root {
       display: flex;
       flex-direction: column;
@@ -206,6 +227,10 @@ export class MermaidEditorComponent implements OnInit, AfterViewInit {
   mermaidTextChange = output<string>();
   modelChange = output<FlowchartModel>();
 
+  // Panel visibility / fullscreen state
+  canvasVisible = signal(true);
+  previewFullscreen = signal(false);
+
   // Split pane state (flex values)
   leftFlex = signal('3');
   rightFlex = signal('2');
@@ -272,6 +297,11 @@ export class MermaidEditorComponent implements OnInit, AfterViewInit {
         this.modelChange.emit(model);
       });
     });
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (this.previewFullscreen()) this.previewFullscreen.set(false);
   }
 
   onShapeSelected(shape: MermaidShape): void {

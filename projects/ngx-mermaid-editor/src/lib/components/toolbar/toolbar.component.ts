@@ -1,4 +1,4 @@
-import { Component, output, inject } from '@angular/core';
+import { Component, output, input, inject } from '@angular/core';
 import { GraphStateService, CanvasMode } from '../../services/graph-state.service';
 import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
 
@@ -73,6 +73,23 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
       }
 
       <div class="toolbar-spacer"></div>
+
+      <div class="toolbar-group">
+        <button
+          class="toolbar-btn"
+          [class.active]="editorVisible()"
+          title="Toggle canvas panel"
+          (click)="toggleEditorClicked.emit()"
+        >◧ Canvas</button>
+        <button
+          class="toolbar-btn"
+          [class.active]="isFullscreen()"
+          [title]="isFullscreen() ? 'Exit preview fullscreen (Esc)' : 'Preview fullscreen'"
+          (click)="fullscreenClicked.emit()"
+        >{{ isFullscreen() ? '⤡ Exit' : '⤢ Preview' }}</button>
+      </div>
+
+      <div class="toolbar-divider"></div>
 
       <div class="toolbar-group">
         <button class="toolbar-btn" title="Auto Layout" (click)="autoLayoutClicked.emit()">⊞ Layout</button>
@@ -159,6 +176,9 @@ import { FlowDirection, MermaidEdgeType } from '../../models/graph-model';
 export class ToolbarComponent {
   state = inject(GraphStateService);
 
+  editorVisible = input<boolean>(true);
+  isFullscreen = input<boolean>(false);
+
   undoClicked = output<void>();
   redoClicked = output<void>();
   deleteClicked = output<void>();
@@ -167,6 +187,8 @@ export class ToolbarComponent {
   zoomInClicked = output<void>();
   zoomOutClicked = output<void>();
   edgeTypeChanged = output<MermaidEdgeType>();
+  toggleEditorClicked = output<void>();
+  fullscreenClicked = output<void>();
 
   setMode(mode: CanvasMode): void {
     this.state.canvasMode.set(mode);
