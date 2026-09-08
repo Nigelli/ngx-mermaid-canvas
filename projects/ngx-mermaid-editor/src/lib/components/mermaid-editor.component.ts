@@ -61,7 +61,7 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
         }
 
         @if ((showTextEditor() || showPreview()) && !disabled()) {
-          <div class="right-pane" [style.flex]="canvasVisible() ? rightFlex() : '1'">
+          <div class="right-pane" [class.side-by-side]="!canvasVisible()" [style.flex]="canvasVisible() ? rightFlex() : '1'">
             @if (showTextEditor()) {
               <lib-text-editor />
             }
@@ -201,9 +201,17 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
     .right-pane > * {
       flex: 1;
       min-height: 0;
+      min-width: 0;
     }
     .right-pane > *:not(:last-child) {
       border-bottom: 1px solid var(--nmc-border, #e0e0e0);
+    }
+    .right-pane.side-by-side {
+      flex-direction: row;
+    }
+    .right-pane.side-by-side > *:not(:last-child) {
+      border-bottom: none;
+      border-right: 1px solid var(--nmc-border, #e0e0e0);
     }
   `],
 })
