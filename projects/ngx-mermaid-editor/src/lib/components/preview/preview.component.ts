@@ -1,6 +1,6 @@
 import {
   Component, inject, effect, ElementRef, ViewChild,
-  AfterViewInit, ChangeDetectionStrategy,
+  AfterViewInit, OnDestroy, ChangeDetectionStrategy,
   Injector, runInInjectionContext,
 } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
@@ -99,7 +99,7 @@ import { ResolvedNmcTheme } from '../../models/theme';
     }
   `],
 })
-export class PreviewComponent implements AfterViewInit {
+export class PreviewComponent implements AfterViewInit, OnDestroy {
   @ViewChild('previewEl', { static: true }) previewRef!: ElementRef<HTMLDivElement>;
   @ViewChild('viewport', { static: true }) viewportRef!: ElementRef<HTMLDivElement>;
 
@@ -116,13 +116,23 @@ export class PreviewComponent implements AfterViewInit {
   private scale = 1;
   private offsetX = 0;
   private offsetY = 0;
+  private resizeObserver?: ResizeObserver;
   private isPanning = false;
   private panStartX = 0;
   private panStartY = 0;
   private panOriginX = 0;
   private panOriginY = 0;
 
+  ngOnDestroy(): void {
+    this.resizeObserver?.disconnect();
+  }
+
   async ngAfterViewInit(): Promise<void> {
+    this.resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(() => this.fitView());
+    });
+    this.resizeObserver.observe(this.viewportRef.nativeElement);
+
     this.mermaidModule = await import('mermaid');
     this.initializeMermaid(this.state.theme());
     this.initialized = true;
