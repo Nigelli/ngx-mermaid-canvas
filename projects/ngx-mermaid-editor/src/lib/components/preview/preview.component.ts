@@ -1,7 +1,7 @@
 import {
   Component, inject, effect, ElementRef, ViewChild,
   AfterViewInit, OnDestroy, ChangeDetectionStrategy,
-  Injector, runInInjectionContext,
+  Injector, runInInjectionContext, input, output,
 } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
 import { GraphStateService } from '../../services/graph-state.service';
@@ -19,6 +19,10 @@ import { ResolvedNmcTheme } from '../../models/theme';
           <button class="pz-btn" title="Zoom in" (click)="zoomBy(1.25)">+</button>
           <button class="pz-btn" title="Zoom out" (click)="zoomBy(0.8)">−</button>
           <button class="pz-btn" title="Fit to view" (click)="fitView()">⊡</button>
+          @if (showClose()) {
+            <button class="pz-btn pz-close" title="Exit fullscreen (Esc)"
+              aria-label="Exit fullscreen" (click)="closeClicked.emit()">✕</button>
+          }
         </div>
       </div>
       <div #viewport class="preview-viewport"
@@ -71,6 +75,7 @@ import { ResolvedNmcTheme } from '../../models/theme';
       line-height: 1.6;
     }
     .pz-btn:hover { background: var(--nmc-accent-soft, #f0f4ff); }
+    .pz-close { margin-left: 4px; }
     .preview-viewport {
       flex: 1;
       overflow: hidden;
@@ -104,6 +109,10 @@ export class PreviewComponent implements AfterViewInit, OnDestroy {
   @ViewChild('viewport', { static: true }) viewportRef!: ElementRef<HTMLDivElement>;
 
   error: string | null = null;
+
+  /** Show an inline close button in the header (used for fullscreen exit). */
+  showClose = input<boolean>(false);
+  closeClicked = output<void>();
 
   private state = inject(GraphStateService);
   private sanitizer = inject(DomSanitizer);
