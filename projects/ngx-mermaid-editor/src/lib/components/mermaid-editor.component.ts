@@ -74,6 +74,15 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
             }
             @if (showPreview()) {
               <div [class.preview-fullscreen]="previewFullscreen()">
+                @if (previewFullscreen()) {
+                  <button
+                    type="button"
+                    class="preview-fullscreen-close"
+                    title="Exit fullscreen (Esc)"
+                    aria-label="Exit fullscreen"
+                    (click)="previewFullscreen.set(false)"
+                  >✕</button>
+                }
                 <lib-preview />
               </div>
             }
@@ -166,6 +175,27 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
     .preview-fullscreen lib-preview {
       height: 100%;
       display: block;
+    }
+    .preview-fullscreen-close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 10000;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+      border: 1px solid var(--nmc-border-strong, #cccccc);
+      border-radius: 4px;
+      background: var(--nmc-surface, #ffffff);
+      color: var(--nmc-text, #333333);
+      cursor: pointer;
+    }
+    .preview-fullscreen-close:hover {
+      background: var(--nmc-accent-soft, #f0f4ff);
     }
     .editor-root {
       display: flex;
