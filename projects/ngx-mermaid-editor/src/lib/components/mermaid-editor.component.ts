@@ -26,6 +26,13 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="editor-root" [class.disabled]="disabled()">
+      @if (previewOnly()) {
+        <div class="editor-body">
+          <div class="right-pane preview-only-pane">
+            <lib-preview />
+          </div>
+        </div>
+      } @else {
       @if (!disabled()) {
         <lib-toolbar
           [editorVisible]="canvasVisible()"
@@ -73,6 +80,7 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
           </div>
         }
       </div>
+      }
     </div>
   `,
   host: {
@@ -213,6 +221,9 @@ import { NmcTheme, NmcThemeName, resolveTheme, NMC_CSS_VARS } from '../models/th
       border-bottom: none;
       border-right: 1px solid var(--nmc-border, #e0e0e0);
     }
+    .right-pane.preview-only-pane {
+      flex: 1;
+    }
   `],
 })
 export class MermaidEditorComponent implements OnInit, AfterViewInit {
@@ -224,6 +235,8 @@ export class MermaidEditorComponent implements OnInit, AfterViewInit {
   showTextEditor = input<boolean>(true);
   showPreview = input<boolean>(true);
   showPalette = input<boolean>(true);
+  /** Render only the read-only preview (no toolbar, canvas or text editor). */
+  previewOnly = input<boolean>(false);
   disabled = input<boolean>(false);
   /** 'light' | 'dark' preset name, or a (partial) NmcTheme object */
   theme = input<NmcThemeName | NmcTheme>('light');
